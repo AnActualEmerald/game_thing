@@ -1,301 +1,227 @@
-// use bevy::prelude::*;
+use core::f32;
 
-// fn main() {
-//   App::build()
-//   .add_plugins(DefaultPlugins)
-//   .add_plugin(HelloPlugin)
-//   .run();
-// }
+use bevy::{ecs::EntityBuilder, prelude::*, render::camera};
 
-// //--SYSTEMS--//
+const WIN_SIZE: (f32, f32) = (300.0, 300.0);
+const TEX_SIZE: f32 = 16.0;
 
-// fn add_people(commands: &mut Commands){
-//   commands
-//     .spawn((Person, Name("Bob".to_string())))
-//     .spawn((Person, Name("Hugo".to_string())));
-// }
-
-// fn greet_people(time: Res<Time>, mut timer: ResMut<GreetTimer>, query: Query<&Name, With<Person>>){
-  
-//   if !timer.0.tick(time.delta_seconds()).just_finished(){
-//     return;
-//   }  
-  
-//   for name in query.iter() {
-//     println!("hello {}!", name.0);
-//   }
-// }
-
-// //--RESOURCES--//
-
-// struct GreetTimer(Timer);
-
-// //--COMPONENTS--//
-
-// struct Person;
-
-// struct Name(String);
-
-// //--PLUGINS--//
-
-// pub struct HelloPlugin;
-
-// impl Plugin for HelloPlugin {
-//   fn build(&self, app: &mut AppBuilder) {
-//     app
-//     .add_resource(GreetTimer(Timer::from_seconds(2.0, true)))
-//     .add_startup_system(add_people.system())
-//     .add_system(greet_people.system());
-//   }
-// }
-
-use bevy::prelude::*;
-use bevy::render::pass::ClearColor;
-use bevy::sprite::collide_aabb::{collide, Collision};
-
-/// An implementation of the classic game "Breakout"
 fn main() {
-  App::build()
-      .add_plugins(DefaultPlugins)
-      .add_resource(Scoreboard { score: 0 })
-      .add_resource(ClearColor(Color::rgb(0.9, 0.9, 0.9)))
-      .add_startup_system(setup.system())
-      .add_system(paddle_movement_system.system())
-      .add_system(ball_collision_system.system())
-      .add_system(ball_movement_system.system())
-      .add_system(scoreboard_system.system())
-      .run();
-}
-
-struct Paddle {
-  speed: f32,
-}
-
-struct Ball {
-  velocity: Vec3,
-}
-
-struct Scoreboard {
-  score: usize,
-}
-
-enum Collider {
-  Solid,
-  Scorable,
-  Paddle,
-}
-
-fn setup(
-  commands: &mut Commands,
-  mut materials: ResMut<Assets<ColorMaterial>>,
-  asset_server: Res<AssetServer>,
-) {
-  // Add the game's entities to our world
-  commands
-      // cameras
-      .spawn(Camera2dBundle::default())
-      .spawn(CameraUiBundle::default())
-      // paddle
-      .spawn(SpriteBundle {
-          material: materials.add(Color::rgb(0.5, 0.5, 1.0).into()),
-          transform: Transform::from_translation(Vec3::new(0.0, -215.0, 0.0)),
-          sprite: Sprite::new(Vec2::new(120.0, 30.0)),
-          ..Default::default()
-      })
-      .with(Paddle { speed: 500.0 })
-      .with(Collider::Paddle)
-      // ball
-      .spawn(SpriteBundle {
-          material: materials.add(Color::rgb(1.0, 0.5, 0.5).into()),
-          transform: Transform::from_translation(Vec3::new(0.0, -50.0, 1.0)),
-          sprite: Sprite::new(Vec2::new(30.0, 30.0)),
-          ..Default::default()
-      })
-      .with(Ball {
-          velocity: 400.0 * Vec3::new(0.5, -0.5, 0.0).normalize(),
-      })
-      // scoreboard
-      .spawn(TextBundle {
-        text: Text {
-            font: asset_server.load("fonts/FiraSans-Bold.ttf"),
-            value: "Score:".to_string(),
-            style: TextStyle {
-                color: Color::rgb(0.5, 0.5, 1.0),
-                font_size: 40.0,
-                ..Default::default()
-            },
-        },
-        style: Style {
-            position_type: PositionType::Absolute,
-            position: Rect {
-                top: Val::Px(5.0),
-                left: Val::Px(5.0),
-                ..Default::default()
-            },
+  let mut timer = FireballTimer(Timer::from_seconds(0.1, true));
+  timer.0.pause();
+  timer.0.reset();
+    App::build()
+        .add_resource(WindowDescriptor {
+            title: "Game Thing".to_string(),
+            width: 600.0,
+            height: 600.0,
+            vsync: true,
+            resizable: false,
             ..Default::default()
-        },
-        ..Default::default()
-    });
-
-  // Add walls
-  let wall_material = materials.add(Color::rgb(0.8, 0.8, 0.8).into());
-  let wall_thickness = 10.0;
-  let bounds = Vec2::new(900.0, 600.0);
-
-  commands
-      // left
-      .spawn(SpriteBundle {
-          material: wall_material.clone(),
-          transform: Transform::from_translation(Vec3::new(-bounds.x / 2.0, 0.0, 0.0)),
-          sprite: Sprite::new(Vec2::new(wall_thickness, bounds.y + wall_thickness)),
-          ..Default::default()
-      })
-      .with(Collider::Solid)
-      // right
-      .spawn(SpriteBundle {
-          material: wall_material.clone(),
-          transform: Transform::from_translation(Vec3::new(bounds.x / 2.0, 0.0, 0.0)),
-          sprite: Sprite::new(Vec2::new(wall_thickness, bounds.y + wall_thickness)),
-          ..Default::default()
-      })
-      .with(Collider::Solid)
-      // bottom
-      .spawn(SpriteBundle {
-          material: wall_material.clone(),
-          transform: Transform::from_translation(Vec3::new(0.0, -bounds.y / 2.0, 0.0)),
-          sprite: Sprite::new(Vec2::new(bounds.x + wall_thickness, wall_thickness)),
-          ..Default::default()
-      })
-      .with(Collider::Solid)
-      // top
-      .spawn(SpriteBundle {
-          material: wall_material,
-          transform: Transform::from_translation(Vec3::new(0.0, bounds.y / 2.0, 0.0)),
-          sprite: Sprite::new(Vec2::new(bounds.x + wall_thickness, wall_thickness)),
-          ..Default::default()
-      })
-      .with(Collider::Solid);
-
-  // Add bricks
-  let brick_rows = 4;
-  let brick_columns = 5;
-  let brick_spacing = 20.0;
-  let brick_size = Vec2::new(150.0, 30.0);
-  let bricks_width = brick_columns as f32 * (brick_size.x + brick_spacing) - brick_spacing;
-  // center the bricks and move them up a bit
-  let bricks_offset = Vec3::new(-(bricks_width - brick_size.x) / 2.0, 100.0, 0.0);
-  let brick_material = materials.add(Color::rgb(0.5, 0.5, 1.0).into());
-  for row in 0..brick_rows {
-      let y_position = row as f32 * (brick_size.y + brick_spacing);
-      for column in 0..brick_columns {
-          let brick_position = Vec3::new(
-              column as f32 * (brick_size.x + brick_spacing),
-              y_position,
-              0.0,
-          ) + bricks_offset;
-          commands
-              // brick
-              .spawn(SpriteBundle {
-                  material: brick_material.clone(),
-                  sprite: Sprite::new(brick_size),
-                  transform: Transform::from_translation(brick_position),
-                  ..Default::default()
-              })
-              .with(Collider::Scorable);
-      }
-  }
+        })
+        .init_resource::<MousePos>()
+        .add_plugins(DefaultPlugins)
+        .add_resource(ClearColor(Color::rgb(25.0, 25.0, 50.0)))
+        .add_resource(timer)
+        .add_startup_system(setup.system())
+        .add_system(move_sys.system())
+        .add_system(spawn_fireball.system())
+        .add_system(mouse_sys.system())
+        .add_system(move_fireball.system())
+        .add_system(grab_cursor.system())
+        .run();
 }
 
-fn paddle_movement_system(
-  time: Res<Time>,
-  keyboard_input: Res<Input<KeyCode>>,
-  mut query: Query<(&Paddle, &mut Transform)>,
+//--components--//
+
+struct Player {
+    speed: f32,
+}
+
+struct Fireball{
+  origin: Vec3,
+  target: Vec3
+}
+
+struct MainCamera;
+
+struct Reticle;
+
+//--resources--//
+
+struct FireballSpr(Handle<ColorMaterial>);
+#[derive(Default)]
+struct MousePos(Transform);
+
+struct FireballTimer(Timer);
+
+
+//set up assets and stuff
+fn setup(
+    commands: &mut Commands,
+    asset_server: Res<AssetServer>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-  for (paddle, mut transform) in query.iter_mut() {
-      let mut direction = 0.0;
-      if keyboard_input.pressed(KeyCode::Left) {
-          direction -= 1.0;
-      }
+    let kerb = asset_server.load("kerbee.png");
+    let fireball = asset_server.load("fireball.png");
+    let reticle = asset_server.load("reticle.png");
 
-      if keyboard_input.pressed(KeyCode::Right) {
-          direction += 1.0;
-      }
+    let fireball_handle = materials.add(fireball.into());
 
-      let translation = &mut transform.translation;
-      // move the paddle horizontally
-      translation.x += time.delta_seconds() * direction * paddle.speed;
-      // bound the paddle within the walls
-      translation.x = translation.x.min(380.0).max(-380.0);
+    commands
+        .spawn(Camera2dBundle::default())
+        .with(MainCamera)
+        .spawn(SpriteBundle {
+            material: materials.add(kerb.into()),
+            transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+            ..Default::default()
+        })
+        .with(Player { speed: 200.0 })
+        .spawn(SpriteBundle{
+          material: materials.add(reticle.into()),
+          transform: Transform::default(),
+          ..Default::default()
+        })
+        .with(Reticle)
+        .insert_resource(FireballSpr(fireball_handle));
+}
+
+//move the sprite
+fn move_sys(time: Res<Time>, input: Res<Input<KeyCode>>, mut q: Query<(&Player, &mut Transform)>) {
+    for (p, mut transform) in q.iter_mut() {
+        let mut x_dir = 0.0;
+        let mut y_dir = 0.0;
+        let mut sprint = 1.0;
+
+        if input.pressed(KeyCode::A) || input.pressed(KeyCode::Left) {
+            x_dir -= 1.0;
+        }
+
+        if input.pressed(KeyCode::D) || input.pressed(KeyCode::Right) {
+            x_dir += 1.0;
+        }
+
+        if input.pressed(KeyCode::W) || input.pressed(KeyCode::Up) {
+            y_dir += 1.0;
+        }
+
+        if input.pressed(KeyCode::S) || input.pressed(KeyCode::Down) {
+            y_dir -= 1.0;
+        }
+
+        if input.pressed(KeyCode::LShift) {
+            sprint = 1.5;
+        }
+
+        let translation = &mut transform.translation;
+
+        translation.x += time.delta_seconds() * p.speed * x_dir * sprint;
+        translation.y += time.delta_seconds() * p.speed * y_dir * sprint;
+
+        //confine player to the screen
+        translation.x = translation
+            .x
+            .min(WIN_SIZE.0 - TEX_SIZE)
+            .max(-(WIN_SIZE.0 - TEX_SIZE));
+        translation.y = translation
+            .y
+            .min(WIN_SIZE.0 - TEX_SIZE)
+            .max(-(WIN_SIZE.0 - TEX_SIZE));
+
+        // println!("x{}, y{}", translation.x, translation.y);
+    }
+}
+
+fn grab_cursor(mut windows: ResMut<Windows>, key: Res<Input<KeyCode>>){
+  let window = windows.get_primary_mut().unwrap();
+
+  if key.pressed(KeyCode::Back) {
+    window.set_cursor_lock_mode(false);
+    window.set_cursor_visibility(true);
+  }else {
+    window.set_cursor_visibility(false);
+    window.set_cursor_lock_mode(true);
   }
 }
 
-fn ball_movement_system(time: Res<Time>, mut ball_query: Query<(&Ball, &mut Transform)>) {
-  // clamp the timestep to stop the ball from escaping when the game starts
-  let delta_seconds = f32::min(0.2, time.delta_seconds());
-
-  for (ball, mut transform) in ball_query.iter_mut() {
-      transform.translation += ball.velocity * delta_seconds;
-  }
-}
-
-fn scoreboard_system(scoreboard: Res<Scoreboard>, mut query: Query<&mut Text>) {
-  for mut text in query.iter_mut() {
-    text.value = format!("Score: {}", scoreboard.score);
-}
-}
-
-fn ball_collision_system(
-  commands: &mut Commands,
-  mut scoreboard: ResMut<Scoreboard>,
-  mut ball_query: Query<(&mut Ball, &Transform, &Sprite)>,
-  collider_query: Query<(Entity, &Collider, &Transform, &Sprite)>,
+fn mouse_sys(
+    ev_cursor: Res<Events<CursorMoved>>,
+    mut evr_cursor: Local<EventReader<CursorMoved>>,
+    wnds: Res<Windows>,
+    mut pos: ResMut<MousePos>,
+    q_camera: Query<&Transform, With<MainCamera>>,
+    mut ret: Query<&mut Transform, With<Reticle>>,
 ) {
-  for (mut ball, ball_transform, sprite) in ball_query.iter_mut() {
-      let ball_size = sprite.size;
-      let velocity = &mut ball.velocity;
 
-      // check collision with walls
-      for (collider_entity, collider, transform, sprite) in collider_query.iter() {
-          let collision = collide(
-              ball_transform.translation,
-              ball_size,
-              transform.translation,
-              sprite.size,
-          );
-          if let Some(collision) = collision {
-              // scorable colliders should be despawned and increment the scoreboard on collision
-              if let Collider::Scorable = *collider {
-                  scoreboard.score += 1;
-                  commands.despawn(collider_entity);
-              }
+    // assuming there is exactly one main camera entity, so this is OK
+    let camera_transform = q_camera.iter().next().unwrap();
 
-              // reflect the ball when it collides
-              let mut reflect_x = false;
-              let mut reflect_y = false;
+    for ev in evr_cursor.iter(&ev_cursor) {
+      
+      let wnd = wnds.get(ev.id).unwrap();
+      
+      let size = Vec2::new(wnd.width() as f32, wnd.height() as f32);
 
-              // only reflect if the ball's velocity is going in the opposite direction of the collision
-              match collision {
-                  Collision::Left => reflect_x = velocity.x > 0.0,
-                  Collision::Right => reflect_x = velocity.x < 0.0,
-                  Collision::Top => reflect_y = velocity.y < 0.0,
-                  Collision::Bottom => reflect_y = velocity.y > 0.0,
-              }
+      let p = ev.position - size / 2.0;  
+      
+      //convert the screen coords to world coords
+      let pos_wld = camera_transform.compute_matrix() * p.extend(0.0).extend(1.0);
 
-              // reflect velocity on the x-axis if we hit something on the x-axis
-              if reflect_x {
-                  velocity.x = -velocity.x;
-              }
+      let translation = &mut pos.0.translation;
+        translation.x = pos_wld.x;
+        translation.y = pos_wld.y;
 
-              // reflect velocity on the y-axis if we hit something on the y-axis
-              if reflect_y {
-                  velocity.y = -velocity.y;
-              }
+        //there should only ever be one of these too
+        let reticle_pos =  &mut ret.iter_mut().next().unwrap();
+        reticle_pos.translation.x = pos_wld.x;
+        reticle_pos.translation.y = pos_wld.y;
 
-              // break if this collide is on a solid, otherwise continue check whether a solid is also in collision
-              if let Collider::Solid = *collider {
-                  break;
-              }
-          }
-      }
+    }
+}
+
+fn spawn_fireball(
+    commands: &mut Commands,
+    input: Res<Input<MouseButton>>,
+    pos: Res<MousePos>,
+    fire_sp: Res<FireballSpr>,
+    player: Query<&Transform, With<Player>>,
+    time: Res<Time>,
+    mut timer: ResMut<FireballTimer>
+) {
+
+  if !timer.0.tick(time.delta_seconds()).just_finished() && !timer.0.paused(){
+    return;
   }
+
+    if input.pressed(MouseButton::Left) {
+      timer.0.unpause();
+      for transform in player.iter() {
+          commands.spawn(SpriteBundle {
+            material: fire_sp.0.clone(),
+            transform: transform.clone(),
+
+            ..Default::default()
+        }).with(Fireball{
+          origin: transform.translation,
+          target: pos.0.translation
+        });
+      }
+    }else {
+      timer.0.pause();
+      timer.0.reset();
+    }
+}
+
+fn move_fireball(commands: &mut Commands, mut q: Query<(Entity, &Fireball, &mut Transform)>){   
+  for (e, f, mut current) in q.iter_mut(){
+      current.rotate(Quat::from_rotation_z(0.5));
+      let mut translation = &mut current.translation;
+      let direction = (f.target - f.origin).normalize();
+      translation.x += 7.0 * direction.x;
+      translation.y += 7.0 * direction.y;
+      if translation.x >= 400.0 || translation.x <= -400.0 || translation.y >= 400.0 || translation.y <= -400.0{
+        commands.despawn(e);
+      }
+      
+    }
+
 }
