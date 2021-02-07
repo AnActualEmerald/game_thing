@@ -1,6 +1,6 @@
 use core::f32;
 
-use bevy::{ecs::EntityBuilder, prelude::*, render::camera};
+use bevy::prelude::*;
 
 const WIN_SIZE: (f32, f32) = (300.0, 300.0);
 const TEX_SIZE: f32 = 16.0;
@@ -131,13 +131,15 @@ fn move_sys(time: Res<Time>, input: Res<Input<KeyCode>>, mut q: Query<(&Player, 
     }
 }
 
-fn grab_cursor(mut windows: ResMut<Windows>, key: Res<Input<KeyCode>>){
+fn grab_cursor(mut windows: ResMut<Windows>, key: Res<Input<KeyCode>>, btn: Res<Input<MouseButton>>){
   let window = windows.get_primary_mut().unwrap();
 
   if key.pressed(KeyCode::Back) {
     window.set_cursor_lock_mode(false);
     window.set_cursor_visibility(true);
-  }else {
+  }
+  
+  if btn.just_pressed(MouseButton::Left){
     window.set_cursor_visibility(false);
     window.set_cursor_lock_mode(true);
   }
@@ -211,13 +213,13 @@ fn spawn_fireball(
     }
 }
 
-fn move_fireball(commands: &mut Commands, mut q: Query<(Entity, &Fireball, &mut Transform)>){   
+fn move_fireball(commands: &mut Commands, time: Res<Time>, mut q: Query<(Entity, &Fireball, &mut Transform)>){   
   for (e, f, mut current) in q.iter_mut(){
       current.rotate(Quat::from_rotation_z(0.5));
       let mut translation = &mut current.translation;
       let direction = (f.target - f.origin).normalize();
-      translation.x += 7.0 * direction.x;
-      translation.y += 7.0 * direction.y;
+      translation.x += 500.0 * direction.x * time.delta_seconds();
+      translation.y += 500.0 * direction.y * time.delta_seconds();
       if translation.x >= 400.0 || translation.x <= -400.0 || translation.y >= 400.0 || translation.y <= -400.0{
         commands.despawn(e);
       }
