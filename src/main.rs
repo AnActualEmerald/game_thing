@@ -6,9 +6,9 @@ const WIN_SIZE: (f32, f32) = (300.0, 300.0);
 const TEX_SIZE: f32 = 16.0;
 
 fn main() {
-  let mut timer = FireballTimer(Timer::from_seconds(0.1, true));
-  timer.0.pause();
-  timer.0.reset();
+    let mut timer = FireballTimer(Timer::from_seconds(0.1, true));
+    timer.0.pause();
+    timer.0.reset();
     App::build()
         .add_resource(WindowDescriptor {
             title: "Game Thing".to_string(),
@@ -28,6 +28,8 @@ fn main() {
         .add_system(mouse_sys.system())
         .add_system(move_fireball.system())
         .add_system(grab_cursor.system())
+        .add_system(spawner_animate.system())
+        // .add_system(spawn_enemies.system())
         .run();
 }
 
@@ -37,14 +39,14 @@ struct Player {
     speed: f32,
 }
 
-struct Fireball{
-  origin: Vec3,
-  target: Vec3
+struct Fireball {
+    origin: Vec3,
+    target: Vec3,
 }
 
 struct MainCamera;
-
 struct Reticle;
+struct EnemySpawn;
 
 //--resources--//
 
@@ -53,17 +55,24 @@ struct FireballSpr(Handle<ColorMaterial>);
 struct MousePos(Transform);
 
 struct FireballTimer(Timer);
-
+struct EnemyTimer(Timer);
 
 //set up assets and stuff
 fn setup(
     commands: &mut Commands,
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
 ) {
     let kerb = asset_server.load("kerbee.png");
     let fireball = asset_server.load("fireball.png");
     let reticle = asset_server.load("reticle.png");
+
+    let spawner = asset_server.load("spawner.png");
+    let spawner_atlas = TextureAtlas::from_grid(spawner, Vec2::new(32.0, 32.0), 3, 1);
+    let mut spawner_transform = Transform::from_scale(Vec3::splat(2.0));
+    spawner_transform.translation.x = -200.0;
+    spawner_transform.translation.y = -200.0;
 
     let fireball_handle = materials.add(fireball.into());
 
@@ -76,12 +85,20 @@ fn setup(
             ..Default::default()
         })
         .with(Player { speed: 200.0 })
-        .spawn(SpriteBundle{
-          material: materials.add(reticle.into()),
-          transform: Transform::default(),
-          ..Default::default()
+        .spawn(SpriteBundle {
+            material: materials.add(reticle.into()),
+            transform: Transform::default(),
+            ..Default::default()
         })
         .with(Reticle)
+        .spawn(SpriteSheetBundle {
+            texture_atlas: texture_atlases.add(spawner_atlas.into()),
+            transform: spawner_transform,
+            ..Default::default()
+        })
+        .with(Timer::from_seconds(0.12, true))
+        .with(EnemySpawn)
+        .with(EnemyTimer(Timer::from_seconds(10.0, true)))
         .insert_resource(FireballSpr(fireball_handle));
 }
 
@@ -131,18 +148,22 @@ fn move_sys(time: Res<Time>, input: Res<Input<KeyCode>>, mut q: Query<(&Player, 
     }
 }
 
-fn grab_cursor(mut windows: ResMut<Windows>, key: Res<Input<KeyCode>>, btn: Res<Input<MouseButton>>){
-  let window = windows.get_primary_mut().unwrap();
+fn grab_cursor(
+    mut windows: ResMut<Windows>,
+    key: Res<Input<KeyCode>>,
+    btn: Res<Input<MouseButton>>,
+) {
+    let window = windows.get_primary_mut().unwrap();
 
-  if key.pressed(KeyCode::Back) {
-    window.set_cursor_lock_mode(false);
-    window.set_cursor_visibility(true);
-  }
-  
-  if btn.just_pressed(MouseButton::Left){
-    window.set_cursor_visibility(false);
-    window.set_cursor_lock_mode(true);
-  }
+    if key.pressed(KeyCode::Back) {
+        window.set_cursor_lock_mode(false);
+        window.set_cursor_visibility(true);
+    }
+
+    if btn.just_pressed(MouseButton::Left) {
+        window.set_cursor_visibility(false);
+        window.set_cursor_lock_mode(true);
+    }
 }
 
 fn mouse_sys(
@@ -153,30 +174,27 @@ fn mouse_sys(
     q_camera: Query<&Transform, With<MainCamera>>,
     mut ret: Query<&mut Transform, With<Reticle>>,
 ) {
-
     // assuming there is exactly one main camera entity, so this is OK
     let camera_transform = q_camera.iter().next().unwrap();
 
     for ev in evr_cursor.iter(&ev_cursor) {
-      
-      let wnd = wnds.get(ev.id).unwrap();
-      
-      let size = Vec2::new(wnd.width() as f32, wnd.height() as f32);
+        let wnd = wnds.get(ev.id).unwrap();
 
-      let p = ev.position - size / 2.0;  
-      
-      //convert the screen coords to world coords
-      let pos_wld = camera_transform.compute_matrix() * p.extend(0.0).extend(1.0);
+        let size = Vec2::new(wnd.width() as f32, wnd.height() as f32);
 
-      let translation = &mut pos.0.translation;
+        let p = ev.position - size / 2.0;
+
+        //convert the screen coords to world coords
+        let pos_wld = camera_transform.compute_matrix() * p.extend(0.0).extend(1.0);
+
+        let translation = &mut pos.0.translation;
         translation.x = pos_wld.x;
         translation.y = pos_wld.y;
 
         //there should only ever be one of these too
-        let reticle_pos =  &mut ret.iter_mut().next().unwrap();
+        let reticle_pos = &mut ret.iter_mut().next().unwrap();
         reticle_pos.translation.x = pos_wld.x;
         reticle_pos.translation.y = pos_wld.y;
-
     }
 }
 
@@ -187,43 +205,78 @@ fn spawn_fireball(
     fire_sp: Res<FireballSpr>,
     player: Query<&Transform, With<Player>>,
     time: Res<Time>,
-    mut timer: ResMut<FireballTimer>
+    mut timer: ResMut<FireballTimer>,
 ) {
-
-  if !timer.0.tick(time.delta_seconds()).just_finished() && !timer.0.paused(){
-    return;
-  }
+    if !timer.0.tick(time.delta_seconds()).just_finished() && !timer.0.paused() {
+        return;
+    }
 
     if input.pressed(MouseButton::Left) {
-      timer.0.unpause();
-      for transform in player.iter() {
-          commands.spawn(SpriteBundle {
-            material: fire_sp.0.clone(),
-            transform: transform.clone(),
+        timer.0.unpause();
+        for transform in player.iter() {
+            commands
+                .spawn(SpriteBundle {
+                    material: fire_sp.0.clone(),
+                    transform: *transform,
 
-            ..Default::default()
-        }).with(Fireball{
-          origin: transform.translation,
-          target: pos.0.translation
-        });
-      }
-    }else {
-      timer.0.pause();
-      timer.0.reset();
+                    ..Default::default()
+                })
+                .with(Fireball {
+                    origin: transform.translation,
+                    target: pos.0.translation,
+                });
+        }
+    } else {
+        timer.0.pause();
+        timer.0.reset();
     }
 }
 
-fn move_fireball(commands: &mut Commands, time: Res<Time>, mut q: Query<(Entity, &Fireball, &mut Transform)>){   
-  for (e, f, mut current) in q.iter_mut(){
-      current.rotate(Quat::from_rotation_z(0.5));
-      let mut translation = &mut current.translation;
-      let direction = (f.target - f.origin).normalize();
-      translation.x += 500.0 * direction.x * time.delta_seconds();
-      translation.y += 500.0 * direction.y * time.delta_seconds();
-      if translation.x >= 400.0 || translation.x <= -400.0 || translation.y >= 400.0 || translation.y <= -400.0{
-        commands.despawn(e);
-      }
-      
+fn move_fireball(
+    commands: &mut Commands,
+    time: Res<Time>,
+    mut q: Query<(Entity, &Fireball, &mut Transform)>,
+) {
+    for (e, f, mut current) in q.iter_mut() {
+        current.rotate(Quat::from_rotation_z(0.5));
+        let mut translation = &mut current.translation;
+        let direction = (f.target - f.origin).normalize();
+        translation.x += 500.0 * direction.x * time.delta_seconds();
+        translation.y += 500.0 * direction.y * time.delta_seconds();
+        if translation.x >= 400.0
+            || translation.x <= -400.0
+            || translation.y >= 400.0
+            || translation.y <= -400.0
+        {
+            commands.despawn(e);
+        }
     }
+}
 
+fn spawn_enemies(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut q: Query<(&Transform, &mut EnemyTimer), With<EnemySpawn>>,
+) {
+    for (transform, mut timer) in q.iter_mut() {
+        if timer.0.tick(time.delta_seconds()).finished() {
+            println!("Enemy Spawned");
+        }
+    }
+}
+
+//--animation systems--//
+
+fn spawner_animate(
+    time: Res<Time>,
+    sheets: Res<Assets<TextureAtlas>>,
+    mut q: Query<(&mut Timer, &mut TextureAtlasSprite, &Handle<TextureAtlas>)>,
+) {
+    for (mut timer, mut sprite, handle) in q.iter_mut() {
+        timer.tick(time.delta_seconds());
+        if timer.finished() {
+            let atlas = sheets.get(handle).unwrap();
+            sprite.index = ((sprite.index as usize + 1) % atlas.textures.len()) as u32;
+        }
+    }
 }
