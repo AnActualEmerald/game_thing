@@ -33,7 +33,7 @@ fn main() {
         .add_system(move_fireball.system())
         .add_system(grab_cursor.system())
         .add_system(spawner_animate.system())
-        .add_system(spawn_enemies.system())
+        // .add_system(spawn_enemies.system())
         .add_system(move_enemies.system())
         .run();
 }
@@ -215,6 +215,7 @@ fn mouse_sys(
     }
 }
 
+//spawn a fireball while the left mouse button is held down, on a 0.1s timer
 fn spawn_fireball(
     commands: &mut Commands,
     input: Res<Input<MouseButton>>,
@@ -230,7 +231,22 @@ fn spawn_fireball(
 
     if input.pressed(MouseButton::Left) {
         timer.0.unpause();
+
         for transform in player.iter() {
+            let origin = transform.translation;
+            let target = {
+                let dir = (pos.0.translation - origin) / (pos.0.translation - origin).abs();
+
+                let res = Vec3::new(
+                    pos.0.translation.x + (1.0 * dir.x),
+                    pos.0.translation.y + (1.0 * dir.y),
+                    0.0,
+                );
+                println!("{:?}", res);
+                res
+                // pos.0.translation
+            };
+
             commands
                 .spawn(SpriteBundle {
                     material: fire_sp.0.clone(),
@@ -239,8 +255,8 @@ fn spawn_fireball(
                     ..Default::default()
                 })
                 .with(Fireball {
-                    origin: transform.translation,
-                    target: pos.0.translation,
+                    origin: origin,
+                    target: target,
                 });
         }
     } else {
@@ -249,6 +265,7 @@ fn spawn_fireball(
     }
 }
 
+//move enemies towards the player
 fn move_enemies(
     time: Res<Time>,
     player_query: Query<&Transform, With<Player>>,
@@ -265,6 +282,7 @@ fn move_enemies(
     }
 }
 
+//move active fireballs towards their target and despawn any that go off screen
 fn move_fireball(
     commands: &mut Commands,
     time: Res<Time>,
@@ -286,6 +304,7 @@ fn move_fireball(
     }
 }
 
+//spawn enemies from each active spawner
 fn spawn_enemies(
     commands: &mut Commands,
     time: Res<Time>,
@@ -309,6 +328,7 @@ fn spawn_enemies(
 
 //--animation systems--//
 
+//animate the enemy spawners
 fn spawner_animate(
     time: Res<Time>,
     sheets: Res<Assets<TextureAtlas>>,
