@@ -1,6 +1,10 @@
 use core::f32;
 
-use bevy::prelude::*;
+use bevy::{
+    prelude::*,
+    sprite::collide_aabb::{collide, Collision},
+    transform,
+};
 
 const WIN_SIZE: (f32, f32) = (300.0, 300.0);
 const TEX_SIZE: f32 = 16.0;
@@ -29,7 +33,8 @@ fn main() {
         .add_system(move_fireball.system())
         .add_system(grab_cursor.system())
         .add_system(spawner_animate.system())
-        // .add_system(spawn_enemies.system())
+        .add_system(spawn_enemies.system())
+        .add_system(move_enemies.system())
         .run();
 }
 
@@ -44,13 +49,22 @@ struct Fireball {
     target: Vec3,
 }
 
+struct Enemy {
+    speed: f32,
+}
+
 struct MainCamera;
 struct Reticle;
 struct EnemySpawn;
 
+enum Collider {
+    solid,
+}
+
 //--resources--//
 
 struct FireballSpr(Handle<ColorMaterial>);
+struct EnemySpr(Handle<ColorMaterial>);
 #[derive(Default)]
 struct MousePos(Transform);
 
@@ -67,6 +81,7 @@ fn setup(
     let kerb = asset_server.load("kerbee.png");
     let fireball = asset_server.load("fireball.png");
     let reticle = asset_server.load("reticle.png");
+    let enemy = asset_server.load("enemy.png");
 
     let spawner = asset_server.load("spawner.png");
     let spawner_atlas = TextureAtlas::from_grid(spawner, Vec2::new(32.0, 32.0), 3, 1);
@@ -75,6 +90,7 @@ fn setup(
     spawner_transform.translation.y = -200.0;
 
     let fireball_handle = materials.add(fireball.into());
+    let enemy_handle = materials.add(enemy.into());
 
     commands
         .spawn(Camera2dBundle::default())
@@ -98,8 +114,9 @@ fn setup(
         })
         .with(Timer::from_seconds(0.12, true))
         .with(EnemySpawn)
-        .with(EnemyTimer(Timer::from_seconds(10.0, true)))
-        .insert_resource(FireballSpr(fireball_handle));
+        .with(EnemyTimer(Timer::from_seconds(5.0, true)))
+        .insert_resource(FireballSpr(fireball_handle))
+        .insert_resource(EnemySpr(enemy_handle));
 }
 
 //move the sprite
@@ -232,6 +249,22 @@ fn spawn_fireball(
     }
 }
 
+fn move_enemies(
+    time: Res<Time>,
+    player_query: Query<&Transform, With<Player>>,
+    mut enemies: Query<(&mut Transform, &Enemy)>,
+) {
+    //there should only be one player
+    let player = player_query.iter().next().unwrap();
+
+    for (mut transform, enemy) in enemies.iter_mut() {
+        let move_vec = (player.translation - transform.translation).normalize();
+
+        transform.translation.x += move_vec.x * enemy.speed * time.delta_seconds();
+        transform.translation.y += move_vec.y * enemy.speed * time.delta_seconds();
+    }
+}
+
 fn move_fireball(
     commands: &mut Commands,
     time: Res<Time>,
@@ -254,13 +287,22 @@ fn move_fireball(
 }
 
 fn spawn_enemies(
-    mut commands: Commands,
+    commands: &mut Commands,
     time: Res<Time>,
-    mut q: Query<(&Transform, &mut EnemyTimer), With<EnemySpawn>>,
+    enemy: Res<EnemySpr>,
+    mut q: Query<(&Transform, &mut EnemyTimer)>,
 ) {
     for (transform, mut timer) in q.iter_mut() {
         if timer.0.tick(time.delta_seconds()).finished() {
-            println!("Enemy Spawned");
+            commands
+                .spawn(SpriteBundle {
+                    material: enemy.0.clone(),
+                    transform: *transform,
+                    sprite: Sprite::new(Vec2::new(14.0, 16.0)),
+                    ..Default::default()
+                })
+                .with(Enemy { speed: 200.0 })
+                .with(Collider::solid);
         }
     }
 }
