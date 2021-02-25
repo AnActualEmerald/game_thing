@@ -6,10 +6,17 @@ use bevy::{
     transform,
 };
 
+#[macro_use] extern crate simplelog;
+use simplelog::{TermLogger, LevelFilter, Config, TerminalMode};
+
 const WIN_SIZE: (f32, f32) = (300.0, 300.0);
 const TEX_SIZE: f32 = 16.0;
 
 fn main() {
+    //set up logging
+    TermLogger::init(LevelFilter::Debug, Config::default(), TerminalMode::Mixed).unwrap();
+
+
     let mut timer = FireballTimer(Timer::from_seconds(0.1, true));
     timer.0.pause();
     timer.0.reset();
@@ -235,16 +242,17 @@ fn spawn_fireball(
         for transform in player.iter() {
             let origin = transform.translation;
             let target = {
-                let dir = (pos.0.translation - origin) / (pos.0.translation - origin).abs();
+                // let dir = ((pos.0.translation - origin) / (pos.0.translation - origin)).abs();
 
-                let res = Vec3::new(
-                    pos.0.translation.x + (1.0 * dir.x),
-                    pos.0.translation.y + (1.0 * dir.y),
-                    0.0,
-                );
-                println!("{:?}", res);
-                res
-                // pos.0.translation
+                // let res = Vec3::new(
+                //     pos.0.translation.x + (1.0 * dir.x),
+                //     pos.0.translation.y + (1.0 * dir.y),
+                //     0.0,
+                // );
+                // println!("{:?}", res);
+                // res
+                info!("Fireball target: {}", pos.0.translation);
+                pos.0.translation
             };
 
             commands
