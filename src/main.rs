@@ -6,8 +6,9 @@ use bevy::{
     transform,
 };
 
-#[macro_use] extern crate simplelog;
-use simplelog::{TermLogger, LevelFilter, Config, TerminalMode};
+#[macro_use]
+extern crate simplelog;
+use simplelog::{Config, LevelFilter, TermLogger, TerminalMode};
 
 const WIN_SIZE: (f32, f32) = (300.0, 300.0);
 const TEX_SIZE: f32 = 16.0;
@@ -15,7 +16,6 @@ const TEX_SIZE: f32 = 16.0;
 fn main() {
     //set up logging
     TermLogger::init(LevelFilter::Debug, Config::default(), TerminalMode::Mixed).unwrap();
-
 
     let mut timer = FireballTimer(Timer::from_seconds(0.1, true));
     timer.0.pause();
@@ -40,8 +40,9 @@ fn main() {
         .add_system(move_fireball.system())
         .add_system(grab_cursor.system())
         .add_system(spawner_animate.system())
-        // .add_system(spawn_enemies.system())
+        .add_system(spawn_enemies.system())
         .add_system(move_enemies.system())
+        .add_system(collide_player.system())
         .run();
 }
 
@@ -65,7 +66,10 @@ struct Reticle;
 struct EnemySpawn;
 
 enum Collider {
-    solid,
+    Solid,
+    Player,
+    Enemy,
+    Projectile,
 }
 
 //--resources--//
@@ -111,6 +115,7 @@ fn setup(
         .spawn(SpriteBundle {
             material: materials.add(reticle.into()),
             transform: Transform::default(),
+            sprite: Sprite::new(Vec2::new(32.0, 32.0)),
             ..Default::default()
         })
         .with(Reticle)
@@ -119,9 +124,11 @@ fn setup(
             transform: spawner_transform,
             ..Default::default()
         })
+        .with(Sprite::new(Vec2::new(32.0, 32.0)))
         .with(Timer::from_seconds(0.12, true))
         .with(EnemySpawn)
         .with(EnemyTimer(Timer::from_seconds(5.0, true)))
+        .with(Collider::Solid)
         .insert_resource(FireballSpr(fireball_handle))
         .insert_resource(EnemySpr(enemy_handle));
 }
@@ -251,7 +258,7 @@ fn spawn_fireball(
                 // );
                 // println!("{:?}", res);
                 // res
-                info!("Fireball target: {}", pos.0.translation);
+                debug!("Fireball target: {}", pos.0.translation);
                 pos.0.translation
             };
 
@@ -259,13 +266,14 @@ fn spawn_fireball(
                 .spawn(SpriteBundle {
                     material: fire_sp.0.clone(),
                     transform: *transform,
-
+                    sprite: Sprite::new(Vec2::new(32.0, 32.0)),
                     ..Default::default()
                 })
                 .with(Fireball {
                     origin: origin,
                     target: target,
-                });
+                })
+                .with(Collider::Projectile);
         }
     } else {
         timer.0.pause();
@@ -302,12 +310,14 @@ fn move_fireball(
         let direction = (f.target - f.origin).normalize();
         translation.x += 500.0 * direction.x * time.delta_seconds();
         translation.y += 500.0 * direction.y * time.delta_seconds();
+        //if the fireball goes off screen, remove it
         if translation.x >= 400.0
             || translation.x <= -400.0
             || translation.y >= 400.0
             || translation.y <= -400.0
         {
             commands.despawn(e);
+            debug!("Removed fireball")
         }
     }
 }
@@ -329,7 +339,48 @@ fn spawn_enemies(
                     ..Default::default()
                 })
                 .with(Enemy { speed: 200.0 })
-                .with(Collider::solid);
+                .with(Collider::Enemy);
+        }
+    }
+}
+
+//--collision systems--//
+fn collide_player(
+    commands: &mut Commands,
+    mut q: Query<(&Player, &mut Transform, &Sprite)>,
+    collision_q: Query<(Entity, &Sprite, &Transform, &Collider)>,
+) {
+    for (p, mut player_t, player_s) in q.iter_mut() {
+        for (ent, spr, tr, col) in collision_q.iter() {
+            let collision = collide(
+                player_t.translation,
+                player_s.size,
+                tr.translation,
+                spr.size,
+            );
+            if let Some(collision) = collision {
+                if let Collider::Enemy = *col {
+                    commands.despawn(ent);
+                    info!("player got hit");
+                }
+
+                if let Collider::Solid = *col {
+                    match collision {
+                        Collision::Top => {
+                            info!("Top collision");
+                        }
+                        Collision::Bottom => {
+                            info!("Bottom collision");
+                        }
+                        Collision::Left => {
+                            info!("Left collision");
+                        }
+                        Collision::Right => {
+                            info!("Right collision");
+                        }
+                    }
+                }
+            }
         }
     }
 }
