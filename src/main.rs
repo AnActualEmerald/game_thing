@@ -3,10 +3,9 @@ use core::f32;
 use bevy::{
     prelude::*,
     sprite::collide_aabb::{collide, Collision},
-    transform,
 };
 
-#[macro_use]
+// #[macro_use]
 extern crate simplelog;
 use simplelog::{Config, LevelFilter, TermLogger, TerminalMode};
 
@@ -43,6 +42,7 @@ fn main() {
         .add_system(spawn_enemies.system())
         .add_system(move_enemies.system())
         .add_system(collide_player.system())
+        .add_system(collide_fireballs.system())
         .run();
 }
 
@@ -67,7 +67,6 @@ struct EnemySpawn;
 
 enum Collider {
     Solid,
-    Player,
     Enemy,
     Projectile,
 }
@@ -134,7 +133,13 @@ fn setup(
 }
 
 //move the sprite
-fn move_sys(time: Res<Time>, input: Res<Input<KeyCode>>, mut q: Query<(&Player, &mut Transform)>) {
+fn move_sys(
+    mouse_pos: Res<MousePos>,
+    time: Res<Time>,
+    input: Res<Input<KeyCode>>,
+    mut q: Query<(&Player, &mut Transform)>,
+    mut ret: Query<&mut Transform, With<Reticle>>,
+) {
     for (p, mut transform) in q.iter_mut() {
         let mut x_dir = 0.0;
         let mut y_dir = 0.0;
@@ -176,6 +181,15 @@ fn move_sys(time: Res<Time>, input: Res<Input<KeyCode>>, mut q: Query<(&Player, 
             .max(-(WIN_SIZE.0 - TEX_SIZE));
 
         // println!("x{}, y{}", translation.x, translation.y);
+
+        //move the reticle
+        let ret_pos = &mut ret.iter_mut().next().unwrap().translation;
+        let ret_line = (mouse_pos.0.translation - *translation).normalize();
+
+        ret_pos.x = translation.x + (150.0 * ret_line.x);
+        ret_pos.y = translation.y + (150.0 * ret_line.y);
+
+        info!("ret pos: {}", ret_pos);
     }
 }
 
@@ -203,7 +217,7 @@ fn mouse_sys(
     wnds: Res<Windows>,
     mut pos: ResMut<MousePos>,
     q_camera: Query<&Transform, With<MainCamera>>,
-    mut ret: Query<&mut Transform, With<Reticle>>,
+    player: Query<&Transform, With<Player>>,
 ) {
     // assuming there is exactly one main camera entity, so this is OK
     let camera_transform = q_camera.iter().next().unwrap();
@@ -218,14 +232,11 @@ fn mouse_sys(
         //convert the screen coords to world coords
         let pos_wld = camera_transform.compute_matrix() * p.extend(0.0).extend(1.0);
 
-        let translation = &mut pos.0.translation;
-        translation.x = pos_wld.x;
-        translation.y = pos_wld.y;
+        let player_pos = player.iter().next().unwrap().translation;
 
-        //there should only ever be one of these too
-        let reticle_pos = &mut ret.iter_mut().next().unwrap();
-        reticle_pos.translation.x = pos_wld.x;
-        reticle_pos.translation.y = pos_wld.y;
+        let translation = &mut pos.0.translation;
+        translation.x = pos_wld.x + player_pos.x;
+        translation.y = pos_wld.y + player_pos.y;
     }
 }
 
@@ -379,6 +390,28 @@ fn collide_player(
                             info!("Right collision");
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+fn collide_fireballs(
+    commands: &mut Commands,
+    balls: Query<(Entity, &Transform, &Sprite), With<Fireball>>,
+    col_query: Query<(Entity, &Transform, &Collider, &Sprite)>,
+) {
+    for (ball_ent, ball_tr, ball_spr) in balls.iter() {
+        for (ent, tr, col, spr) in col_query.iter() {
+            if let Some(_) = collide(ball_tr.translation, ball_spr.size, tr.translation, spr.size) {
+                match *col {
+                    Collider::Enemy => {
+                        commands.despawn(ball_ent).despawn(ent);
+                    }
+                    Collider::Solid => {
+                        commands.despawn(ball_ent);
+                    }
+                    _ => continue,
                 }
             }
         }
