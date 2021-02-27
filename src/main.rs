@@ -34,6 +34,7 @@ fn main() {
         .add_resource(timer)
         .add_startup_system(setup.system())
         .add_system(move_sys.system())
+        .add_system(collide_player.system())
         .add_system(spawn_fireball.system())
         .add_system(mouse_sys.system())
         .add_system(move_fireball.system())
@@ -41,7 +42,6 @@ fn main() {
         .add_system(spawner_animate.system())
         .add_system(spawn_enemies.system())
         .add_system(move_enemies.system())
-        .add_system(collide_player.system())
         .add_system(collide_fireballs.system())
         .run();
 }
@@ -50,6 +50,8 @@ fn main() {
 
 struct Player {
     speed: f32,
+    mod_y: f32,
+    mod_x: f32,
 }
 
 struct Fireball {
@@ -110,7 +112,11 @@ fn setup(
             transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
             ..Default::default()
         })
-        .with(Player { speed: 200.0 })
+        .with(Player {
+            speed: 200.0,
+            mod_x: 0.0,
+            mod_y: 0.0,
+        })
         .spawn(SpriteBundle {
             material: materials.add(reticle.into()),
             transform: Transform::default(),
@@ -123,7 +129,7 @@ fn setup(
             transform: spawner_transform,
             ..Default::default()
         })
-        .with(Sprite::new(Vec2::new(32.0, 32.0)))
+        .with(Sprite::new(Vec2::new(64.0, 64.0)))
         .with(Timer::from_seconds(0.12, true))
         .with(EnemySpawn)
         .with(EnemyTimer(Timer::from_seconds(5.0, true)))
@@ -137,10 +143,10 @@ fn move_sys(
     mouse_pos: Res<MousePos>,
     time: Res<Time>,
     input: Res<Input<KeyCode>>,
-    mut q: Query<(&Player, &mut Transform)>,
+    mut q: Query<(&mut Player, &mut Transform)>,
     mut ret: Query<&mut Transform, With<Reticle>>,
 ) {
-    for (p, mut transform) in q.iter_mut() {
+    for (mut p, mut transform) in q.iter_mut() {
         let mut x_dir = 0.0;
         let mut y_dir = 0.0;
         let mut sprint = 1.0;
@@ -167,8 +173,8 @@ fn move_sys(
 
         let translation = &mut transform.translation;
 
-        translation.x += time.delta_seconds() * p.speed * x_dir * sprint;
-        translation.y += time.delta_seconds() * p.speed * y_dir * sprint;
+        translation.x += time.delta_seconds() * p.speed * (x_dir + p.mod_x) * sprint;
+        translation.y += time.delta_seconds() * p.speed * (y_dir + p.mod_y) * sprint;
 
         //confine player to the screen
         translation.x = translation
@@ -180,16 +186,12 @@ fn move_sys(
             .min(WIN_SIZE.0 - TEX_SIZE)
             .max(-(WIN_SIZE.0 - TEX_SIZE));
 
-        // println!("x{}, y{}", translation.x, translation.y);
-
         //move the reticle
         let ret_pos = &mut ret.iter_mut().next().unwrap().translation;
         let ret_line = (mouse_pos.0.translation - *translation).normalize();
 
         ret_pos.x = translation.x + (150.0 * ret_line.x);
         ret_pos.y = translation.y + (150.0 * ret_line.y);
-
-        info!("ret pos: {}", ret_pos);
     }
 }
 
@@ -358,10 +360,10 @@ fn spawn_enemies(
 //--collision systems--//
 fn collide_player(
     commands: &mut Commands,
-    mut q: Query<(&Player, &mut Transform, &Sprite)>,
+    mut q: Query<(&mut Player, &mut Transform, &Sprite)>,
     collision_q: Query<(Entity, &Sprite, &Transform, &Collider)>,
 ) {
-    for (p, mut player_t, player_s) in q.iter_mut() {
+    for (mut p, mut player_t, player_s) in q.iter_mut() {
         for (ent, spr, tr, col) in collision_q.iter() {
             let collision = collide(
                 player_t.translation,
@@ -375,10 +377,15 @@ fn collide_player(
                     info!("player got hit");
                 }
 
+                //refers to the side of the object being collided with, not the player
                 if let Collider::Solid = *col {
                     match collision {
                         Collision::Top => {
-                            info!("Top collision");
+                            info!("player pos {}", player_t.translation);
+                            info!("collider pos {}", tr.translation);
+                            player_t.translation.y -= ((player_t.translation.y - (player_s.size.y*0.5)) - (tr.translation.y + (spr.size.y*0.5)));
+                            player_t.translation.y = player_t.translation.y.floor();
+                            info!("new pos {}", player_t.translation);
                         }
                         Collision::Bottom => {
                             info!("Bottom collision");
