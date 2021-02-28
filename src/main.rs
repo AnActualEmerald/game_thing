@@ -4,17 +4,40 @@ use bevy::{
     prelude::*,
     sprite::collide_aabb::{collide, Collision},
 };
+use log::{debug, error, info, trace, warn};
+use simplelog::{CombinedLogger, Config, LevelFilter, TermLogger, TerminalMode};
+use std::fs::File;
 
-// #[macro_use]
-extern crate simplelog;
-use simplelog::{Config, LevelFilter, TermLogger, TerminalMode};
-
-const WIN_SIZE: (f32, f32) = (300.0, 300.0);
+const WIN_SIZE: (f32, f32) = (1280.0 / 2.0, 720.0 / 2.0);
 const TEX_SIZE: f32 = 16.0;
 
 fn main() {
     //set up logging
-    TermLogger::init(LevelFilter::Warn, Config::default(), TerminalMode::Mixed).unwrap();
+    CombinedLogger::init(vec![
+        #[cfg(debug_assertions)]
+        TermLogger::new(LevelFilter::Info, Config::default(), TerminalMode::Mixed),
+        #[cfg(not(debug_assertions))]
+        simplelog::WriteLogger::new(
+            LevelFilter::Info,
+            Config::default(),
+            File::create(format!(
+                "game_{}.log",
+                chrono::Local::now().date().format("%m_%d_%y")
+            ))
+            .unwrap(),
+        ),
+        #[cfg(not(debug_assertions))]
+        simplelog::WriteLogger::new(
+            LevelFilter::Trace,
+            Config::default(),
+            File::create(format!(
+                "debug_{}.log",
+                chrono::Local::now().date().format("%m_%d_%y")
+            ))
+            .unwrap(),
+        ),
+    ])
+    .unwrap();
 
     let mut timer = FireballTimer(Timer::from_seconds(0.1, true));
     timer.0.pause();
@@ -22,13 +45,14 @@ fn main() {
     App::build()
         .add_resource(WindowDescriptor {
             title: "Game Thing".to_string(),
-            width: 600.0,
-            height: 600.0,
+            width: 1280.0,
+            height: 720.0,
             vsync: true,
             resizable: false,
             ..Default::default()
         })
         .init_resource::<MousePos>()
+        .init_resource::<MouseDelta>()
         .add_plugins(DefaultPlugins)
         .add_resource(ClearColor(Color::rgb(25.0, 25.0, 50.0)))
         .add_resource(timer)
@@ -38,7 +62,6 @@ fn main() {
         .add_system(spawn_fireball.system())
         .add_system(mouse_sys.system())
         .add_system(move_fireball.system())
-        .add_system(grab_cursor.system())
         .add_system(spawner_animate.system())
         .add_system(spawn_enemies.system())
         .add_system(move_enemies.system())
@@ -80,6 +103,8 @@ struct FireballSpr(Handle<ColorMaterial>);
 struct EnemySpr(Handle<ColorMaterial>);
 #[derive(Default)]
 struct MousePos(Transform);
+#[derive(Default)]
+struct MouseDelta(Vec2);
 
 struct FireballTimer(Timer);
 struct EnemyTimer(Timer);
@@ -105,6 +130,13 @@ fn setup(
         .spawn(Camera2dBundle::default())
         .with(MainCamera)
         .spawn(SpriteBundle {
+            material: materials.add(reticle.into()),
+            transform: Transform::from_translation(Vec3::new(100.0, 0.0, 0.0)),
+            sprite: Sprite::new(Vec2::new(32.0, 32.0)),
+            ..Default::default()
+        })
+        .with(Reticle)
+        .spawn(SpriteBundle {
             material: materials.add(kerb.into()),
             transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
             ..Default::default()
@@ -114,13 +146,6 @@ fn setup(
             mod_x: 0.0,
             mod_y: 0.0,
         })
-        .spawn(SpriteBundle {
-            material: materials.add(reticle.into()),
-            transform: Transform::default(),
-            sprite: Sprite::new(Vec2::new(32.0, 32.0)),
-            ..Default::default()
-        })
-        .with(Reticle)
         .insert_resource(FireballSpr(fireball_handle))
         .insert_resource(EnemySpr(enemy_handle));
 
@@ -130,8 +155,8 @@ fn setup(
             if x == 0 || y == 0 {
                 continue;
             }
-            spawner_transform.translation.x = (200 * x) as f32;
-            spawner_transform.translation.y = (200 * y) as f32;
+            spawner_transform.translation.x = (WIN_SIZE.0 - 100.0) * x as f32;
+            spawner_transform.translation.y = (WIN_SIZE.1 - 100.0) * y as f32;
             let spawner_atlas =
                 TextureAtlas::from_grid(spawner.clone_weak(), Vec2::new(32.0, 32.0), 3, 1);
             commands
@@ -143,7 +168,7 @@ fn setup(
                 .with(Sprite::new(Vec2::new(64.0, 64.0)))
                 .with(Timer::from_seconds(0.12, true))
                 .with(EnemySpawn)
-                .with(EnemyTimer(Timer::from_seconds(5.0, true)))
+                .with(EnemyTimer(Timer::from_seconds(2.0, true)))
                 .with(Collider::Solid);
             info!("Added enemy spawn at {}", spawner_transform.translation);
         }
@@ -152,7 +177,6 @@ fn setup(
 
 //move the sprite
 fn move_sys(
-    mut mouse_pos: ResMut<MousePos>,
     time: Res<Time>,
     input: Res<Input<KeyCode>>,
     mut q: Query<(&Player, &mut Transform)>,
@@ -162,21 +186,20 @@ fn move_sys(
         let mut x_dir = 0.0;
         let mut y_dir = 0.0;
         let mut sprint = 1.0;
-        let start = transform.translation;
 
-        if input.pressed(KeyCode::A) || input.pressed(KeyCode::Left) {
+        if input.pressed(KeyCode::A) {
             x_dir -= 1.0;
         }
 
-        if input.pressed(KeyCode::D) || input.pressed(KeyCode::Right) {
+        if input.pressed(KeyCode::D) {
             x_dir += 1.0;
         }
 
-        if input.pressed(KeyCode::W) || input.pressed(KeyCode::Up) {
+        if input.pressed(KeyCode::W) {
             y_dir += 1.0;
         }
 
-        if input.pressed(KeyCode::S) || input.pressed(KeyCode::Down) {
+        if input.pressed(KeyCode::S) {
             y_dir -= 1.0;
         }
 
@@ -192,38 +215,37 @@ fn move_sys(
         //confine player to the screen
         translation.x = translation
             .x
-            .min(WIN_SIZE.0 - TEX_SIZE)
-            .max(-(WIN_SIZE.0 - TEX_SIZE));
+            .min(1280.0 / 2.0 - TEX_SIZE)
+            .max(-(1280.0 / 2.0 - TEX_SIZE));
         translation.y = translation
             .y
-            .min(WIN_SIZE.0 - TEX_SIZE)
-            .max(-(WIN_SIZE.0 - TEX_SIZE));
+            .min(720.0 / 2.0 - TEX_SIZE)
+            .max(-(720.0 / 2.0 - TEX_SIZE));
 
         //move the reticle
-        mouse_pos.0.translation += *translation - start;
         let ret_pos = &mut ret.iter_mut().next().unwrap().translation;
-        let ret_line = (mouse_pos.0.translation - *translation).normalize();
 
-        ret_pos.x = translation.x + (100.0 * ret_line.x);
-        ret_pos.y = translation.y + (100.0 * ret_line.y);
-    }
-}
+        if input.pressed(KeyCode::Up) {
+            ret_pos.y = 100.0;
+        } else if input.pressed(KeyCode::Down) {
+            ret_pos.y = -100.0;
+        }
 
-fn grab_cursor(
-    mut windows: ResMut<Windows>,
-    key: Res<Input<KeyCode>>,
-    btn: Res<Input<MouseButton>>,
-) {
-    let window = windows.get_primary_mut().unwrap();
+        if input.pressed(KeyCode::Left) {
+            ret_pos.x = -100.0;
+        } else if input.pressed(KeyCode::Right) {
+            ret_pos.x = 100.0;
+        }
 
-    if key.pressed(KeyCode::Back) {
-        window.set_cursor_lock_mode(false);
-        window.set_cursor_visibility(true);
-    }
+        if !input.pressed(KeyCode::Up) && !input.pressed(KeyCode::Down) {
+            ret_pos.y = 0.0;
+        }
+        if !input.pressed(KeyCode::Left) && !input.pressed(KeyCode::Right) {
+            ret_pos.x = 0.0;
+        }
 
-    if btn.just_pressed(MouseButton::Left) {
-        window.set_cursor_visibility(false);
-        window.set_cursor_lock_mode(true);
+        ret_pos.x += translation.x;
+        ret_pos.y += translation.y;
     }
 }
 
@@ -232,12 +254,13 @@ fn mouse_sys(
     mut evr_cursor: Local<EventReader<CursorMoved>>,
     mut wnds: ResMut<Windows>,
     mut pos: ResMut<MousePos>,
+    mut delta: ResMut<MouseDelta>,
     q_camera: Query<&Transform, With<MainCamera>>,
     player: Query<&Transform, With<Player>>,
 ) {
     // assuming there is exactly one main camera entity, so this is OK
     let camera_transform = q_camera.iter().next().unwrap();
-
+    let start = pos.0;
     for ev in evr_cursor.iter(&ev_cursor) {
         let wnd = wnds.get_mut(ev.id).unwrap();
 
@@ -251,23 +274,21 @@ fn mouse_sys(
         let player_pos = player.iter().next().unwrap().translation;
 
         let translation = &mut pos.0.translation;
+
         translation.x = pos_wld.x + player_pos.x;
         translation.y = pos_wld.y + player_pos.y;
 
-        // //get the player pos in screen coords
-        // let pl = Vec2::from(player_pos) + size * 2.0;
-        // let play_scrn = camera_transform.compute_matrix() / pl.extend(0.0).extend(1.0).into();
-        // wnd.set_cursor_position(play_scrn.into());
+        delta.0 = delta.0 + (pos.0.translation - start.translation).into();
     }
 }
 
 //spawn a fireball while the left mouse button is held down, on a 0.1s timer
 fn spawn_fireball(
     commands: &mut Commands,
-    input: Res<Input<MouseButton>>,
-    pos: Res<MousePos>,
+    input: Res<Input<KeyCode>>,
     fire_sp: Res<FireballSpr>,
     player: Query<&Transform, With<Player>>,
+    ret: Query<&Transform, With<Reticle>>,
     time: Res<Time>,
     mut timer: ResMut<FireballTimer>,
 ) {
@@ -275,23 +296,22 @@ fn spawn_fireball(
         return;
     }
 
-    if input.pressed(MouseButton::Left) {
+    if input.pressed(KeyCode::Right)
+        || input.pressed(KeyCode::Left)
+        || input.pressed(KeyCode::Up)
+        || input.pressed(KeyCode::Down)
+    {
         timer.0.unpause();
 
         for transform in player.iter() {
             let origin = transform.translation;
             let target = {
-                // let dir = ((pos.0.translation - origin) / (pos.0.translation - origin)).abs();
-
-                // let res = Vec3::new(
-                //     pos.0.translation.x + (1.0 * dir.x),
-                //     pos.0.translation.y + (1.0 * dir.y),
-                //     0.0,
-                // );
-                // println!("{:?}", res);
-                // res
-                debug!("Fireball target: {}", pos.0.translation);
-                pos.0.translation
+                let tr = ret.iter().next().unwrap_or_else(|| {
+                    error!("Tried to aim at the reticle, but the reticle was missing");
+                    panic!("Expected a reticle, got NONE instead");
+                });
+                debug!("Fireball target: {}", tr.translation);
+                tr.translation
             };
 
             commands
@@ -343,10 +363,10 @@ fn move_fireball(
         translation.x += 500.0 * direction.x * time.delta_seconds();
         translation.y += 500.0 * direction.y * time.delta_seconds();
         //if the fireball goes off screen, remove it
-        if translation.x >= 400.0
-            || translation.x <= -400.0
-            || translation.y >= 400.0
-            || translation.y <= -400.0
+        if translation.x >= WIN_SIZE.0 + 100.0
+            || translation.x <= -WIN_SIZE.0 - 100.0
+            || translation.y >= WIN_SIZE.1 + 100.0
+            || translation.y <= -WIN_SIZE.1 - 100.0
         {
             commands.despawn(e);
             debug!("Removed fireball")
@@ -370,7 +390,7 @@ fn spawn_enemies(
                     sprite: Sprite::new(Vec2::new(14.0, 16.0)),
                     ..Default::default()
                 })
-                .with(Enemy { speed: 200.0 })
+                .with(Enemy { speed: 175.0 })
                 .with(Collider::Enemy);
         }
     }
