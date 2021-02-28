@@ -14,7 +14,7 @@ const TEX_SIZE: f32 = 16.0;
 
 fn main() {
     //set up logging
-    TermLogger::init(LevelFilter::Debug, Config::default(), TerminalMode::Mixed).unwrap();
+    TermLogger::init(LevelFilter::Warn, Config::default(), TerminalMode::Mixed).unwrap();
 
     let mut timer = FireballTimer(Timer::from_seconds(0.1, true));
     timer.0.pause();
@@ -42,6 +42,7 @@ fn main() {
         .add_system(spawner_animate.system())
         .add_system(spawn_enemies.system())
         .add_system(move_enemies.system())
+        .add_system(collide_enemies.system())
         .add_system(collide_fireballs.system())
         .run();
 }
@@ -96,11 +97,7 @@ fn setup(
     let enemy = asset_server.load("enemy.png");
 
     let spawner = asset_server.load("spawner.png");
-    let spawner_atlas = TextureAtlas::from_grid(spawner, Vec2::new(32.0, 32.0), 3, 1);
     let mut spawner_transform = Transform::from_scale(Vec3::splat(2.0));
-    spawner_transform.translation.x = -200.0;
-    spawner_transform.translation.y = -200.0;
-
     let fireball_handle = materials.add(fireball.into());
     let enemy_handle = materials.add(enemy.into());
 
@@ -124,32 +121,48 @@ fn setup(
             ..Default::default()
         })
         .with(Reticle)
-        .spawn(SpriteSheetBundle {
-            texture_atlas: texture_atlases.add(spawner_atlas.into()),
-            transform: spawner_transform,
-            ..Default::default()
-        })
-        .with(Sprite::new(Vec2::new(64.0, 64.0)))
-        .with(Timer::from_seconds(0.12, true))
-        .with(EnemySpawn)
-        .with(EnemyTimer(Timer::from_seconds(5.0, true)))
-        .with(Collider::Solid)
         .insert_resource(FireballSpr(fireball_handle))
         .insert_resource(EnemySpr(enemy_handle));
+
+    //add spawners
+    for x in -1..2 {
+        for y in -1..2 {
+            if x == 0 || y == 0 {
+                continue;
+            }
+            spawner_transform.translation.x = (200 * x) as f32;
+            spawner_transform.translation.y = (200 * y) as f32;
+            let spawner_atlas =
+                TextureAtlas::from_grid(spawner.clone_weak(), Vec2::new(32.0, 32.0), 3, 1);
+            commands
+                .spawn(SpriteSheetBundle {
+                    texture_atlas: texture_atlases.add(spawner_atlas.into()),
+                    transform: spawner_transform,
+                    ..Default::default()
+                })
+                .with(Sprite::new(Vec2::new(64.0, 64.0)))
+                .with(Timer::from_seconds(0.12, true))
+                .with(EnemySpawn)
+                .with(EnemyTimer(Timer::from_seconds(5.0, true)))
+                .with(Collider::Solid);
+            info!("Added enemy spawn at {}", spawner_transform.translation);
+        }
+    }
 }
 
 //move the sprite
 fn move_sys(
-    mouse_pos: Res<MousePos>,
+    mut mouse_pos: ResMut<MousePos>,
     time: Res<Time>,
     input: Res<Input<KeyCode>>,
-    mut q: Query<(&mut Player, &mut Transform)>,
+    mut q: Query<(&Player, &mut Transform)>,
     mut ret: Query<&mut Transform, With<Reticle>>,
 ) {
-    for (mut p, mut transform) in q.iter_mut() {
+    for (p, mut transform) in q.iter_mut() {
         let mut x_dir = 0.0;
         let mut y_dir = 0.0;
         let mut sprint = 1.0;
+        let start = transform.translation;
 
         if input.pressed(KeyCode::A) || input.pressed(KeyCode::Left) {
             x_dir -= 1.0;
@@ -187,11 +200,12 @@ fn move_sys(
             .max(-(WIN_SIZE.0 - TEX_SIZE));
 
         //move the reticle
+        mouse_pos.0.translation += *translation - start;
         let ret_pos = &mut ret.iter_mut().next().unwrap().translation;
         let ret_line = (mouse_pos.0.translation - *translation).normalize();
 
-        ret_pos.x = translation.x + (150.0 * ret_line.x);
-        ret_pos.y = translation.y + (150.0 * ret_line.y);
+        ret_pos.x = translation.x + (100.0 * ret_line.x);
+        ret_pos.y = translation.y + (100.0 * ret_line.y);
     }
 }
 
@@ -216,7 +230,7 @@ fn grab_cursor(
 fn mouse_sys(
     ev_cursor: Res<Events<CursorMoved>>,
     mut evr_cursor: Local<EventReader<CursorMoved>>,
-    wnds: Res<Windows>,
+    mut wnds: ResMut<Windows>,
     mut pos: ResMut<MousePos>,
     q_camera: Query<&Transform, With<MainCamera>>,
     player: Query<&Transform, With<Player>>,
@@ -225,7 +239,7 @@ fn mouse_sys(
     let camera_transform = q_camera.iter().next().unwrap();
 
     for ev in evr_cursor.iter(&ev_cursor) {
-        let wnd = wnds.get(ev.id).unwrap();
+        let wnd = wnds.get_mut(ev.id).unwrap();
 
         let size = Vec2::new(wnd.width() as f32, wnd.height() as f32);
 
@@ -239,6 +253,11 @@ fn mouse_sys(
         let translation = &mut pos.0.translation;
         translation.x = pos_wld.x + player_pos.x;
         translation.y = pos_wld.y + player_pos.y;
+
+        // //get the player pos in screen coords
+        // let pl = Vec2::from(player_pos) + size * 2.0;
+        // let play_scrn = camera_transform.compute_matrix() / pl.extend(0.0).extend(1.0).into();
+        // wnd.set_cursor_position(play_scrn.into());
     }
 }
 
@@ -360,10 +379,10 @@ fn spawn_enemies(
 //--collision systems--//
 fn collide_player(
     commands: &mut Commands,
-    mut q: Query<(&mut Player, &mut Transform, &Sprite)>,
+    mut q: Query<(&mut Transform, &Sprite), With<Player>>,
     collision_q: Query<(Entity, &Sprite, &Transform, &Collider)>,
 ) {
-    for (mut p, mut player_t, player_s) in q.iter_mut() {
+    for (mut player_t, player_s) in q.iter_mut() {
         for (ent, spr, tr, col) in collision_q.iter() {
             let collision = collide(
                 player_t.translation,
@@ -381,21 +400,68 @@ fn collide_player(
                 if let Collider::Solid = *col {
                     match collision {
                         Collision::Top => {
-                            info!("player pos {}", player_t.translation);
-                            info!("collider pos {}", tr.translation);
-                            player_t.translation.y -= ((player_t.translation.y - (player_s.size.y*0.5)) - (tr.translation.y + (spr.size.y*0.5)));
+                            player_t.translation.y -= (player_t.translation.y
+                                - (player_s.size.y * 0.5))
+                                - (tr.translation.y + (spr.size.y * 0.5));
                             player_t.translation.y = player_t.translation.y.floor();
-                            info!("new pos {}", player_t.translation);
                         }
                         Collision::Bottom => {
-                            info!("Bottom collision");
+                            player_t.translation.y -= (player_t.translation.y
+                                + (player_s.size.y * 0.5))
+                                - (tr.translation.y - (spr.size.y * 0.5));
+                            player_t.translation.y = player_t.translation.y.floor();
                         }
                         Collision::Left => {
-                            info!("Left collision");
+                            player_t.translation.x -= (player_t.translation.x
+                                + (player_s.size.x * 0.5))
+                                - (tr.translation.x - (spr.size.x * 0.5));
+                            player_t.translation.x = player_t.translation.x.floor();
                         }
                         Collision::Right => {
-                            info!("Right collision");
+                            player_t.translation.x -= (player_t.translation.x
+                                - (player_s.size.x * 0.5))
+                                - (tr.translation.x + (spr.size.x * 0.5));
+                            player_t.translation.x = player_t.translation.x.floor();
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn collide_enemies(mut q: Query<(&mut Transform, &Sprite), With<Enemy>>) {
+    let mut enemies = q.iter_mut();
+    while let Some((mut tr, spr)) = enemies.next() {
+        if let Some((other_tr, other_spr)) = enemies.next() {
+            let collision = collide(
+                tr.translation,
+                spr.size,
+                other_tr.translation,
+                other_spr.size,
+            );
+
+            if let Some(coll) = collision {
+                match coll {
+                    Collision::Top => {
+                        tr.translation.y -= (tr.translation.y - (spr.size.y * 0.5))
+                            - (other_tr.translation.y + (other_spr.size.y * 0.5));
+                        tr.translation.y = tr.translation.y.ceil();
+                    }
+                    Collision::Bottom => {
+                        tr.translation.y -= (tr.translation.y + (spr.size.y * 0.5))
+                            - (other_tr.translation.y - (other_spr.size.y * 0.5));
+                        tr.translation.y = tr.translation.y.ceil();
+                    }
+                    Collision::Left => {
+                        tr.translation.x -= (tr.translation.x + (spr.size.x * 0.5))
+                            - (other_tr.translation.x - (other_spr.size.x * 0.5));
+                        tr.translation.x = tr.translation.x.ceil();
+                    }
+                    Collision::Right => {
+                        tr.translation.x -= (tr.translation.x - (spr.size.x * 0.5))
+                            - (other_tr.translation.x + (other_spr.size.x * 0.5));
+                        tr.translation.x = tr.translation.x.ceil();
                     }
                 }
             }
