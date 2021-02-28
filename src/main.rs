@@ -115,7 +115,9 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
+    audio: Res<Audio>,
 ) {
+    let music = asset_server.load("music1.mp3");
     let kerb = asset_server.load("kerbee.png");
     let fireball = asset_server.load("fireball.png");
     let reticle = asset_server.load("reticle.png");
@@ -173,6 +175,8 @@ fn setup(
             info!("Added enemy spawn at {}", spawner_transform.translation);
         }
     }
+    audio.play(music);
+    info!("Game start :)");
 }
 
 //move the sprite
