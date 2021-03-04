@@ -8,6 +8,8 @@ use log::{debug, error, info, trace, warn};
 use simplelog::{CombinedLogger, Config, LevelFilter, TermLogger, TerminalMode};
 use std::fs::File;
 
+mod ui;
+
 const WIN_SIZE: (f32, f32) = (1280.0 / 2.0, 720.0 / 2.0);
 const TEX_SIZE: f32 = 16.0;
 
@@ -67,6 +69,7 @@ fn main() {
         .add_system(move_enemies.system())
         .add_system(collide_enemies.system())
         .add_system(collide_fireballs.system())
+        .add_system(ui::player_hit_handler.system())
         .run();
 }
 
@@ -74,6 +77,7 @@ fn main() {
 
 struct Player {
     speed: f32,
+    hp: i16,
     mod_y: f32,
     mod_x: f32,
 }
@@ -97,6 +101,14 @@ enum Collider {
     Projectile,
 }
 
+//used in ui module
+pub struct Index(i32);
+
+//--events--//
+//these need to be public for use in other files
+
+pub struct PlayerHitEvent(Entity);
+
 //--resources--//
 
 struct FireballSpr(Handle<ColorMaterial>);
@@ -108,6 +120,8 @@ struct MouseDelta(Vec2);
 
 struct FireballTimer(Timer);
 struct EnemyTimer(Timer);
+
+//--systems--//
 
 //set up assets and stuff
 fn setup(
@@ -122,6 +136,7 @@ fn setup(
     let fireball = asset_server.load("fireball.png");
     let reticle = asset_server.load("reticle.png");
     let enemy = asset_server.load("enemy.png");
+    let heart = asset_server.load("heart.png");
 
     let spawner = asset_server.load("spawner.png");
     let mut spawner_transform = Transform::from_scale(Vec3::splat(2.0));
@@ -145,11 +160,13 @@ fn setup(
         })
         .with(Player {
             speed: 200.0,
+            hp: 3,
             mod_x: 0.0,
             mod_y: 0.0,
         })
         .insert_resource(FireballSpr(fireball_handle))
-        .insert_resource(EnemySpr(enemy_handle));
+        .insert_resource(EnemySpr(enemy_handle))
+        .insert_resource(Events::<PlayerHitEvent>::default());
 
     //add spawners
     for x in -1..2 {
@@ -174,6 +191,24 @@ fn setup(
                 .with(Collider::Solid);
             info!("Added enemy spawn at {}", spawner_transform.translation);
         }
+    }
+
+    //add hearts
+    for i in 0..3 {
+        let heart_atlas = TextureAtlas::from_grid(heart.clone_weak(), Vec2::new(16.0, 16.0), 2, 1);
+        let mut tr = Transform::from_translation(Vec3::new(
+            -WIN_SIZE.0 + (36.0 * i as f32) + 20.0,
+            WIN_SIZE.1 - 20.0,
+            0.0,
+        ));
+        tr.scale = Vec3::splat(2.0);
+        commands
+            .spawn(SpriteSheetBundle {
+                texture_atlas: texture_atlases.add(heart_atlas.into()),
+                transform: tr,
+                ..Default::default()
+            })
+            .with(Index(i));
     }
     audio.play(music);
     info!("Game start :)");
@@ -403,10 +438,11 @@ fn spawn_enemies(
 //--collision systems--//
 fn collide_player(
     commands: &mut Commands,
-    mut q: Query<(&mut Transform, &Sprite), With<Player>>,
+    mut q: Query<(Entity, &mut Transform, &Sprite), With<Player>>,
     collision_q: Query<(Entity, &Sprite, &Transform, &Collider)>,
+    mut ev_playerhit: ResMut<Events<PlayerHitEvent>>,
 ) {
-    for (mut player_t, player_s) in q.iter_mut() {
+    for (player_ent, mut player_t, player_s) in q.iter_mut() {
         for (ent, spr, tr, col) in collision_q.iter() {
             let collision = collide(
                 player_t.translation,
@@ -417,6 +453,7 @@ fn collide_player(
             if let Some(collision) = collision {
                 if let Collider::Enemy = *col {
                     commands.despawn(ent);
+                    ev_playerhit.send(PlayerHitEvent(player_ent));
                     info!("player got hit");
                 }
 
