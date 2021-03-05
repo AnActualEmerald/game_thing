@@ -1,5 +1,3 @@
-use core::f32;
-
 use bevy::{
     prelude::*,
     sprite::collide_aabb::{collide, Collision},
@@ -121,6 +119,8 @@ struct MouseDelta(Vec2);
 struct FireballTimer(Timer);
 struct EnemyTimer(Timer);
 
+struct DifficultyTimer(Timer);
+
 //--systems--//
 
 //set up assets and stuff
@@ -166,7 +166,8 @@ fn setup(
         })
         .insert_resource(FireballSpr(fireball_handle))
         .insert_resource(EnemySpr(enemy_handle))
-        .insert_resource(Events::<PlayerHitEvent>::default());
+        .insert_resource(Events::<PlayerHitEvent>::default())
+        .insert_resource(DifficultyTimer(Timer::from_seconds(30.0, true)));
 
     //add spawners
     for x in -1..2 {
@@ -418,8 +419,10 @@ fn spawn_enemies(
     commands: &mut Commands,
     time: Res<Time>,
     enemy: Res<EnemySpr>,
+    mut diff: ResMut<DifficultyTimer>,
     mut q: Query<(&Transform, &mut EnemyTimer)>,
 ) {
+    diff.0.tick(time.delta_seconds());
     for (transform, mut timer) in q.iter_mut() {
         if timer.0.tick(time.delta_seconds()).finished() {
             commands
@@ -431,6 +434,15 @@ fn spawn_enemies(
                 })
                 .with(Enemy { speed: 175.0 })
                 .with(Collider::Enemy);
+        }
+        if diff.0.finished() {
+            let dur = timer.0.duration();
+            if dur <= 0.5 {
+                info!("DIFFICULTY MAX!!!");
+            } else {
+                timer.0.set_duration(dur - 0.5);
+                info!("Difficulty went up!");
+            }
         }
     }
 }

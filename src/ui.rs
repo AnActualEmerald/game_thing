@@ -18,12 +18,14 @@ pub fn player_hit_handler(
     sheets: Res<Assets<TextureAtlas>>,
     mut q: Query<(&mut TextureAtlasSprite, &Handle<TextureAtlas>, &Index)>,
 ) {
-    for ev in event_reader.iter(&events) {
+    for _ev in event_reader.iter(&events) {
         hp.0 -= 1;
         info!("Player HP is {}", hp.0);
 
-        if hp.0 < 0 {
+        if hp.0 == 0 {
             info!("Player died");
+        } else if hp.0 < 0 {
+            error!("This shouldn't happen in the real game");
             return;
         }
 
