@@ -1,7 +1,4 @@
-use std::f64::consts;
-
 use bevy::{
-    math,
     prelude::{Commands, Sprite, SpriteBundle, Transform},
 };
 use bevy::{
@@ -9,6 +6,7 @@ use bevy::{
     prelude::Handle,
     sprite::ColorMaterial,
 };
+use log::{debug, error, info};
 
 use crate::Collider;
 use crate::Fireball;
@@ -44,16 +42,12 @@ impl Attack for Split {
     ) {
         let up: Vec3 = Vec3::unit_y() * 100.0;
         let raw_target = *target - *origin;
-        let angle = up.angle_between(raw_target) + 10f32.to_radians() * std::f32::consts::PI;
+        let angle = up.angle_between(raw_target) + 90f32.to_radians();
 
-        let diff1 = Vec3::new(angle.cos(), angle.sin(), 0.0) * 100.0;
+        let diff: Vec3 = Vec3::new(angle.cos() + angle.sin(), angle.sin() - angle.cos(), 0.0).normalize() * 10.0;
 
-        let angle = up.angle_between(raw_target) - 10f32.to_radians() * std::f32::consts::PI;
-        let diff2 = Vec3::new(angle.cos(), angle.sin(), 0.0) * 100.0;
-        println!("diff: {}", diff1);
-
-        let target_1 = Vec3::new(target.x + diff1.x, target.y + diff1.y, 0.0);
-        let target_2 = Vec3::new(target.x - diff2.x, target.y - diff2.y, 0.0);
+        let target_1 = Vec3::new(target.x + diff.x, target.y + diff.y, 0.0);
+        let target_2 = Vec3::new(target.x - diff.x, target.y - diff.y, 0.0);
 
         commands
             .spawn(SpriteBundle {
@@ -78,6 +72,19 @@ impl Attack for Split {
             .with(Fireball {
                 origin: *origin,
                 target: target_2,
+            })
+            .with(Collider::Projectile);
+
+        commands
+            .spawn(SpriteBundle {
+                material: fire_sp.clone(),
+                transform: Transform::from_translation(*origin),
+                sprite: Sprite::new(Vec2::new(32.0, 32.0)),
+                ..Default::default()
+            })
+            .with(Fireball {
+                origin: *origin,
+                target: *target,
             })
             .with(Collider::Projectile);
     }
