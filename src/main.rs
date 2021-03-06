@@ -9,6 +9,9 @@ use std::fs::File;
 
 mod attacks;
 mod ui;
+mod gameplay;
+
+use gameplay::*;
 
 const WIN_SIZE: (f32, f32) = (1280.0 / 2.0, 720.0 / 2.0);
 const TEX_SIZE: f32 = 16.0;
@@ -75,26 +78,9 @@ fn main() {
 
 //--components--//
 
-struct Player {
-    speed: f32,
-    mod_y: f32,
-    mod_x: f32,
-}
-
-struct Fireball {
-    origin: Vec3,
-    target: Vec3,
-}
-
-struct Enemy {
-    speed: f32,
-}
-
 struct MainCamera;
-struct Reticle;
-struct EnemySpawn;
 
-enum Collider {
+pub enum Collider {
     Solid,
     Enemy,
     Projectile,
@@ -110,19 +96,19 @@ pub struct PlayerHitEvent(Entity);
 
 //--resources--//
 
-struct FireballSpr(Handle<ColorMaterial>);
-struct EnemySpr(Handle<ColorMaterial>);
+pub struct FireballSpr(Handle<ColorMaterial>);
+pub struct EnemySpr(Handle<ColorMaterial>);
 #[derive(Default)]
 struct MousePos(Transform);
 #[derive(Default)]
 struct MouseDelta(Vec2);
 
-struct FireballTimer(Timer);
-struct EnemyTimer(Timer);
+pub struct FireballTimer(Timer);
+pub struct EnemyTimer(Timer);
 
-struct DifficultyTimer(Timer);
+pub struct DifficultyTimer(Timer);
 
-struct CurrentAttack(
+pub struct CurrentAttack(
     Box<dyn Attack + Send + Sync>, // Box<dyn FnMut(&mut Commands, &Vec3, &Vec3, &Handle<ColorMaterial>) + Send + Sync>,
 );
 
@@ -163,11 +149,7 @@ fn setup(
             transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
             ..Default::default()
         })
-        .with(Player {
-            speed: 200.0,
-            mod_x: 0.0,
-            mod_y: 0.0,
-        })
+        .with(Player::new(200.0))
         .insert_resource(FireballSpr(fireball_handle))
         .insert_resource(EnemySpr(enemy_handle))
         .insert_resource(Events::<PlayerHitEvent>::default())
@@ -220,79 +202,6 @@ fn setup(
     info!("Game start :)");
 }
 
-//move the sprite
-fn move_sys(
-    time: Res<Time>,
-    input: Res<Input<KeyCode>>,
-    mut q: Query<(&Player, &mut Transform)>,
-    mut ret: Query<&mut Transform, With<Reticle>>,
-) {
-    for (p, mut transform) in q.iter_mut() {
-        let mut x_dir = 0.0;
-        let mut y_dir = 0.0;
-        let mut sprint = 1.0;
-
-        if input.pressed(KeyCode::A) {
-            x_dir -= 1.0;
-        }
-
-        if input.pressed(KeyCode::D) {
-            x_dir += 1.0;
-        }
-
-        if input.pressed(KeyCode::W) {
-            y_dir += 1.0;
-        }
-
-        if input.pressed(KeyCode::S) {
-            y_dir -= 1.0;
-        }
-
-        if input.pressed(KeyCode::LShift) {
-            sprint = 1.5;
-        }
-
-        let translation = &mut transform.translation;
-
-        translation.x += time.delta_seconds() * p.speed * (x_dir + p.mod_x) * sprint;
-        translation.y += time.delta_seconds() * p.speed * (y_dir + p.mod_y) * sprint;
-
-        //confine player to the screen
-        translation.x = translation
-            .x
-            .min(1280.0 / 2.0 - TEX_SIZE)
-            .max(-(1280.0 / 2.0 - TEX_SIZE));
-        translation.y = translation
-            .y
-            .min(720.0 / 2.0 - TEX_SIZE)
-            .max(-(720.0 / 2.0 - TEX_SIZE));
-
-        //move the reticle
-        let ret_pos = &mut ret.iter_mut().next().unwrap().translation;
-
-        if input.pressed(KeyCode::Up) {
-            ret_pos.y = 100.0;
-        } else if input.pressed(KeyCode::Down) {
-            ret_pos.y = -100.0;
-        }
-
-        if input.pressed(KeyCode::Left) {
-            ret_pos.x = -100.0;
-        } else if input.pressed(KeyCode::Right) {
-            ret_pos.x = 100.0;
-        }
-
-        if !input.pressed(KeyCode::Up) && !input.pressed(KeyCode::Down) {
-            ret_pos.y = 0.0;
-        }
-        if !input.pressed(KeyCode::Left) && !input.pressed(KeyCode::Right) {
-            ret_pos.x = 0.0;
-        }
-
-        ret_pos.x += translation.x;
-        ret_pos.y += translation.y;
-    }
-}
 
 fn mouse_sys(
     ev_cursor: Res<Events<CursorMoved>>,
@@ -301,7 +210,7 @@ fn mouse_sys(
     mut pos: ResMut<MousePos>,
     mut delta: ResMut<MouseDelta>,
     q_camera: Query<&Transform, With<MainCamera>>,
-    player: Query<&Transform, With<Player>>,
+    player: Query<&Transform, With<gameplay::Player>>,
 ) {
     // assuming there is exactly one main camera entity, so this is OK
     let camera_transform = q_camera.iter().next().unwrap();
@@ -324,47 +233,6 @@ fn mouse_sys(
         translation.y = pos_wld.y + player_pos.y;
 
         delta.0 = delta.0 + (pos.0.translation - start.translation).into();
-    }
-}
-
-//spawn a fireball while the left mouse button is held down, on a 0.1s timer
-fn spawn_fireball(
-    commands: &mut Commands,
-    input: Res<Input<KeyCode>>,
-    fire_sp: Res<FireballSpr>,
-    player: Query<&Transform, With<Player>>,
-    ret: Query<&Transform, With<Reticle>>,
-    time: Res<Time>,
-    mut timer: ResMut<FireballTimer>,
-    attack: ResMut<CurrentAttack>,
-) {
-    if !timer.0.tick(time.delta_seconds()).just_finished() && !timer.0.paused() {
-        return;
-    }
-
-    if input.pressed(KeyCode::Right)
-        || input.pressed(KeyCode::Left)
-        || input.pressed(KeyCode::Up)
-        || input.pressed(KeyCode::Down)
-    {
-        timer.0.unpause();
-
-        for transform in player.iter() {
-            let origin = transform.translation;
-            let target = {
-                let tr = ret.iter().next().unwrap_or_else(|| {
-                    error!("Tried to aim at the reticle, but the reticle was missing");
-                    panic!("Expected a reticle, got NONE instead");
-                });
-                debug!("Fireball target: {}", tr.translation);
-                tr.translation
-            };
-
-            attack.0.attack(commands, &origin, &target, &fire_sp.0);
-        }
-    } else {
-        timer.0.pause();
-        timer.0.reset();
     }
 }
 
@@ -409,38 +277,7 @@ fn move_fireball(
     }
 }
 
-//spawn enemies from each active spawner
-fn spawn_enemies(
-    commands: &mut Commands,
-    time: Res<Time>,
-    enemy: Res<EnemySpr>,
-    mut diff: ResMut<DifficultyTimer>,
-    mut q: Query<(&Transform, &mut EnemyTimer)>,
-) {
-    diff.0.tick(time.delta_seconds());
-    for (transform, mut timer) in q.iter_mut() {
-        if timer.0.tick(time.delta_seconds()).finished() {
-            commands
-                .spawn(SpriteBundle {
-                    material: enemy.0.clone(),
-                    transform: *transform,
-                    sprite: Sprite::new(Vec2::new(14.0, 16.0)),
-                    ..Default::default()
-                })
-                .with(Enemy { speed: 175.0 })
-                .with(Collider::Enemy);
-        }
-        if diff.0.finished() {
-            let dur = timer.0.duration();
-            if dur <= 0.5 {
-                info!("DIFFICULTY MAX!!!");
-            } else {
-                timer.0.set_duration(dur - 0.5);
-                info!("Difficulty went up!");
-            }
-        }
-    }
-}
+
 
 //--collision systems--//
 fn collide_player(
