@@ -1,3 +1,4 @@
+use attacks::Attack;
 use bevy::{
     prelude::*,
     sprite::collide_aabb::{collide, Collision},
@@ -6,6 +7,7 @@ use log::{debug, error, info, trace, warn};
 use simplelog::{CombinedLogger, Config, LevelFilter, TermLogger, TerminalMode};
 use std::fs::File;
 
+mod attacks;
 mod ui;
 
 const WIN_SIZE: (f32, f32) = (1280.0 / 2.0, 720.0 / 2.0);
@@ -75,7 +77,6 @@ fn main() {
 
 struct Player {
     speed: f32,
-    hp: i16,
     mod_y: f32,
     mod_x: f32,
 }
@@ -121,6 +122,10 @@ struct EnemyTimer(Timer);
 
 struct DifficultyTimer(Timer);
 
+struct CurrentAttack(
+    Box<dyn Attack + Send + Sync>, // Box<dyn FnMut(&mut Commands, &Vec3, &Vec3, &Handle<ColorMaterial>) + Send + Sync>,
+);
+
 //--systems--//
 
 //set up assets and stuff
@@ -160,14 +165,14 @@ fn setup(
         })
         .with(Player {
             speed: 200.0,
-            hp: 3,
             mod_x: 0.0,
             mod_y: 0.0,
         })
         .insert_resource(FireballSpr(fireball_handle))
         .insert_resource(EnemySpr(enemy_handle))
         .insert_resource(Events::<PlayerHitEvent>::default())
-        .insert_resource(DifficultyTimer(Timer::from_seconds(30.0, true)));
+        .insert_resource(DifficultyTimer(Timer::from_seconds(30.0, true)))
+        .insert_resource(CurrentAttack(Box::new(attacks::Basic)));
 
     //add spawners
     for x in -1..2 {
@@ -331,6 +336,7 @@ fn spawn_fireball(
     ret: Query<&Transform, With<Reticle>>,
     time: Res<Time>,
     mut timer: ResMut<FireballTimer>,
+    attack: ResMut<CurrentAttack>,
 ) {
     if !timer.0.tick(time.delta_seconds()).just_finished() && !timer.0.paused() {
         return;
@@ -354,18 +360,7 @@ fn spawn_fireball(
                 tr.translation
             };
 
-            commands
-                .spawn(SpriteBundle {
-                    material: fire_sp.0.clone(),
-                    transform: *transform,
-                    sprite: Sprite::new(Vec2::new(32.0, 32.0)),
-                    ..Default::default()
-                })
-                .with(Fireball {
-                    origin: origin,
-                    target: target,
-                })
-                .with(Collider::Projectile);
+            attack.0.attack(commands, &origin, &target, &fire_sp.0);
         }
     } else {
         timer.0.pause();
