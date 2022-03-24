@@ -12,13 +12,12 @@ impl Default for PlayerHP {
 }
 
 pub fn player_hit_handler(
-    events: Res<Events<PlayerHitEvent>>,
-    mut event_reader: Local<EventReader<PlayerHitEvent>>,
+    mut events: EventReader<PlayerHitEvent>,
     mut hp: Local<PlayerHP>,
     sheets: Res<Assets<TextureAtlas>>,
     mut q: Query<(&mut TextureAtlasSprite, &Handle<TextureAtlas>, &Index)>,
 ) {
-    for _ev in event_reader.iter(&events) {
+    for _ev in events.iter() {
         hp.0 -= 1;
         info!("Player HP is {}", hp.0);
 
@@ -32,8 +31,7 @@ pub fn player_hit_handler(
         for (mut heart_sprite, handle, i) in q.iter_mut() {
             if i.0 == hp.0 as i32 {
                 let atlas = sheets.get(handle).unwrap();
-                heart_sprite.index =
-                    ((heart_sprite.index as usize + 1) % atlas.textures.len()) as u32;
+                heart_sprite.index = (heart_sprite.index + 1) % atlas.textures.len();
             }
         }
     }

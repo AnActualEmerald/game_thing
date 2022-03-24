@@ -1,36 +1,53 @@
-use log::{debug, error, info, trace, warn};
 use bevy::prelude::*;
+use log::{debug, error, info, trace, warn};
 use rand::random;
+use std::time::Duration;
 
-use crate::{Collider, CurrentAttack, DifficultyTimer, EnemySpr, EnemyTimer, FireballSpr, FireballTimer, TEX_SIZE, WIN_SIZE, attacks::{self, Attack}};
+use crate::{
+    attacks::{self, Attack},
+    Collider, CurrentAttack, DifficultyTimer, EnemySpr, EnemyTimer, FireballSpr, FireballTimer,
+    TEX_SIZE, WIN_SIZE,
+};
 
-
+#[derive(Component)]
 pub struct Powerup {
-    attack: Box<dyn Attack + Send + Sync>
+    attack: Box<dyn Attack + Send + Sync>,
 }
 
+#[derive(Component)]
 pub struct Player {
     pub speed: f32,
     mod_y: f32,
     mod_x: f32,
 }
 
-impl Player{
+impl Player {
     pub fn new(speed: f32) -> Player {
-        Player{speed: speed, mod_x: 0.0, mod_y: 0.0}
+        Player {
+            speed: speed,
+            mod_x: 0.0,
+            mod_y: 0.0,
+        }
     }
 }
 
+#[derive(Component)]
 pub struct Fireball {
     pub origin: Vec3,
     pub target: Vec3,
 }
 
+#[derive(Component)]
 pub struct Enemy {
     pub speed: f32,
 }
+
+#[derive(Component)]
 pub struct Reticle;
+
+#[derive(Component)]
 pub struct EnemySpawn;
+
 #[derive(Default)]
 pub struct Elapsed(f32);
 
@@ -39,7 +56,7 @@ pub fn move_sys(
     time: Res<Time>,
     input: Res<Input<KeyCode>>,
     mut q: Query<(&Player, &mut Transform)>,
-    mut ret: Query<&mut Transform, With<Reticle>>,
+    mut ret: Query<&mut Transform, (With<Reticle>, Without<Player>)>,
 ) {
     for (p, mut transform) in q.iter_mut() {
         let mut x_dir = 0.0;
@@ -110,7 +127,7 @@ pub fn move_sys(
 
 //spawn a fireball while the left mouse button is held down, on a 0.1s timer
 pub fn spawn_fireball(
-    commands: &mut Commands,
+    mut commands: Commands,
     input: Res<Input<KeyCode>>,
     fire_sp: Res<FireballSpr>,
     player: Query<&Transform, With<Player>>,
@@ -119,7 +136,7 @@ pub fn spawn_fireball(
     mut timer: ResMut<FireballTimer>,
     attack: ResMut<CurrentAttack>,
 ) {
-    if !timer.0.tick(time.delta_seconds()).just_finished() && !timer.0.paused() {
+    if !timer.0.tick(time.delta()).just_finished() && !timer.0.paused() {
         return;
     }
 
@@ -133,15 +150,12 @@ pub fn spawn_fireball(
         for transform in player.iter() {
             let origin = transform.translation;
             let target = {
-                let tr = ret.iter().next().unwrap_or_else(|| {
-                    error!("Tried to aim at the reticle, but the reticle was missing");
-                    panic!("Expected a reticle, got NONE instead");
-                });
+                let tr = ret.single();
                 debug!("Fireball target: {}", tr.translation);
                 tr.translation
             };
 
-            attack.0.attack(commands, &origin, &target, &fire_sp.0);
+            attack.0.attack(&mut commands, &origin, &target, &fire_sp.0);
         }
     } else {
         timer.0.pause();
@@ -151,49 +165,67 @@ pub fn spawn_fireball(
 
 //spawn enemies from each active spawner
 pub fn spawn_enemies(
-    commands: &mut Commands,
+    mut commands: Commands,
     time: Res<Time>,
     enemy: Res<EnemySpr>,
     mut diff: ResMut<DifficultyTimer>,
     mut q: Query<(&Transform, &mut EnemyTimer)>,
 ) {
-    diff.0.tick(time.delta_seconds());
+    diff.0.tick(time.delta());
     for (transform, mut timer) in q.iter_mut() {
-        if timer.0.tick(time.delta_seconds()).finished() {
+        if timer.0.tick(time.delta()).finished() {
             commands
-                .spawn(SpriteBundle {
-                    material: enemy.0.clone(),
-                    transform: *transform,
-                    sprite: Sprite::new(Vec2::new(14.0, 16.0)),
+                .spawn_bundle(SpriteBundle {
+                    texture: enemy.0.clone(),
+                    transform: transform.with_scale(Vec3::splat(1.5)),
+                    sprite: Sprite {
+                        color: Color::ALICE_BLUE,
+                        ..Default::default()
+                    },
                     ..Default::default()
                 })
-                .with(Enemy { speed: 175.0 })
-                .with(Collider::Enemy);
+                .insert(Enemy { speed: 175.0 })
+                .insert(Collider::Enemy);
         }
         if diff.0.finished() {
             let dur = timer.0.duration();
-            if dur <= 0.5 {
+            if dur <= Duration::from_secs_f32(0.5) {
                 info!("DIFFICULTY MAX!!!");
             } else {
-                timer.0.set_duration(dur - 0.5);
+                timer.0.set_duration(dur - Duration::from_secs_f32(0.5));
                 info!("Difficulty went up!");
             }
         }
     }
 }
 
-pub fn spawn_powerups(commands: &mut Commands, time: Res<Time>, mut elapsed: Local<Elapsed>, powerup: Res<EnemySpr>){
+pub fn spawn_powerups(
+    commands: &mut Commands,
+    time: Res<Time>,
+    mut elapsed: Local<Elapsed>,
+    powerup: Res<EnemySpr>,
+) {
     elapsed.0 = elapsed.0 + time.delta_seconds();
-    if elapsed.0 >= 30.0{
-        let mut tr = Transform::from_translation(Vec3::new(random::<i32>().min(WIN_SIZE.0 as i32) as f32, random::<i32>().min(WIN_SIZE.1 as i32) as f32, 0.0));
+    if elapsed.0 >= 30.0 {
+        let mut tr = Transform::from_translation(Vec3::new(
+            random::<i32>().min(WIN_SIZE.0 as i32) as f32,
+            random::<i32>().min(WIN_SIZE.1 as i32) as f32,
+            0.0,
+        ));
         tr.scale = Vec3::splat(0.5);
-        commands.spawn(SpriteBundle{
-            material: powerup.0.clone(),
-            transform: tr,
-            sprite: Sprite::new(Vec2::new(7.0, 8.0)),
-            ..Default::default()
-        }).with(Powerup{
-            attack: Box::new(attacks::Split),
-        });
+        commands
+            .spawn_bundle(SpriteBundle {
+                texture: powerup.0.clone(),
+                transform: tr,
+                sprite: Sprite {
+                    custom_size: Some(Vec2::new(7.0, 8.0)),
+                    color: Color::RED,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .insert(Powerup {
+                attack: Box::new(attacks::Split),
+            });
     }
 }
