@@ -65,15 +65,15 @@ fn main() {
         .add_event::<PlayerHitEvent>()
         .add_startup_system(setup)
         .add_system(move_sys)
-        // .add_system(collide_player)
+        .add_system(collide_player)
         .add_system(spawn_fireball)
         .add_system(mouse_sys)
         .add_system(move_fireball)
         .add_system(spawner_animate)
         .add_system(spawn_enemies)
         .add_system(move_enemies)
-        // .add_system(collide_enemies)
-        // .add_system(collide_fireballs)
+        .add_system(collide_enemies)
+        .add_system(collide_fireballs)
         .add_system(ui::player_hit_handler)
         .run();
 }
@@ -164,7 +164,8 @@ fn setup(
             },
             ..Default::default()
         })
-        .insert(Player::new(200.0));
+        .insert(Player::new(200.0))
+        .insert(Hitbox(Vec2::new(32.0, 32.0)));
     commands.insert_resource(FireballSpr(fireball));
     commands.insert_resource(EnemySpr(enemy));
     commands.insert_resource(DifficultyTimer(Timer::from_seconds(30.0, true)));
@@ -190,14 +191,16 @@ fn setup(
                 .insert(Timer::from_seconds(0.12, true))
                 .insert(EnemySpawn)
                 .insert(EnemyTimer(Timer::from_seconds(2.0, true)))
-                .insert(Collider::Solid);
+                .insert(Collider::Solid)
+                .insert(Hitbox(Vec2::new(32.0, 50.0)));
             info!("Added enemy spawn at {}", spawner_transform.translation);
         }
     }
 
+    let heart_atlas = TextureAtlas::from_grid(heart, Vec2::new(16.0, 16.0), 2, 1);
+    let heart_handle = texture_atlases.add(heart_atlas);
     //add hearts
     for i in 0..3 {
-        let heart_atlas = TextureAtlas::from_grid(heart.clone_weak(), Vec2::new(16.0, 16.0), 2, 1);
         let mut tr = Transform::from_translation(Vec3::new(
             -WIN_SIZE.0 + (36.0 * i as f32) + 20.0,
             WIN_SIZE.1 - 20.0,
@@ -206,7 +209,7 @@ fn setup(
         tr.scale = Vec3::splat(2.0);
         commands
             .spawn_bundle(SpriteSheetBundle {
-                texture_atlas: texture_atlases.add(heart_atlas.into()),
+                texture_atlas: heart_handle.clone(),
                 transform: tr,
                 ..Default::default()
             })
@@ -294,18 +297,13 @@ fn move_fireball(
 //--collision systems--//
 fn collide_player(
     mut commands: Commands,
-    mut q: Query<(Entity, &mut Transform, &Sprite), With<Player>>,
-    collision_q: Query<(Entity, &Sprite, &Transform, &Collider), Without<Player>>,
+    mut q: Query<(Entity, &mut Transform, &Hitbox), With<Player>>,
+    collision_q: Query<(Entity, &Hitbox, &Transform, &Collider), Without<Player>>,
     mut ev_playerhit: EventWriter<PlayerHitEvent>,
 ) {
-    for (player_ent, mut player_t, player_s) in q.iter_mut() {
-        for (ent, spr, tr, col) in collision_q.iter() {
-            let collision = collide(
-                player_t.translation,
-                player_s.custom_size.unwrap(),
-                tr.translation,
-                spr.custom_size.unwrap(),
-            );
+    for (player_ent, mut player_t, size) in q.iter_mut() {
+        for (ent, other_size, tr, col) in collision_q.iter() {
+            let collision = collide(player_t.translation, size.0, tr.translation, size.0);
             if let Some(collision) = collision {
                 if let Collider::Enemy = *col {
                     commands.entity(ent).despawn();
@@ -317,27 +315,23 @@ fn collide_player(
                 if let Collider::Solid = *col {
                     match collision {
                         Collision::Top => {
-                            player_t.translation.y -= (player_t.translation.y
-                                - (player_s.custom_size.unwrap().y * 0.5))
-                                - (tr.translation.y + (spr.custom_size.unwrap().y * 0.5));
+                            player_t.translation.y -= (player_t.translation.y - (size.0.y * 0.5))
+                                - (tr.translation.y + (other_size.0.y * 0.5));
                             player_t.translation.y = player_t.translation.y.floor();
                         }
                         Collision::Bottom => {
-                            player_t.translation.y -= (player_t.translation.y
-                                + (player_s.custom_size.unwrap().y * 0.5))
-                                - (tr.translation.y - (spr.custom_size.unwrap().y * 0.5));
+                            player_t.translation.y -= (player_t.translation.y + (size.0.y * 0.5))
+                                - (tr.translation.y - (other_size.0.y * 0.5));
                             player_t.translation.y = player_t.translation.y.floor();
                         }
                         Collision::Left => {
-                            player_t.translation.x -= (player_t.translation.x
-                                + (player_s.custom_size.unwrap().x * 0.5))
-                                - (tr.translation.x - (spr.custom_size.unwrap().x * 0.5));
+                            player_t.translation.x -= (player_t.translation.x + (size.0.x * 0.5))
+                                - (tr.translation.x - (other_size.0.x * 0.5));
                             player_t.translation.x = player_t.translation.x.floor();
                         }
                         Collision::Right => {
-                            player_t.translation.x -= (player_t.translation.x
-                                - (player_s.custom_size.unwrap().x * 0.5))
-                                - (tr.translation.x + (spr.custom_size.unwrap().x * 0.5));
+                            player_t.translation.x -= (player_t.translation.x - (size.0.x * 0.5))
+                                - (tr.translation.x + (other_size.0.x * 0.5));
                             player_t.translation.x = player_t.translation.x.floor();
                         }
                     }
@@ -347,37 +341,32 @@ fn collide_player(
     }
 }
 
-fn collide_enemies(mut q: Query<(&mut Transform, &Sprite), With<Enemy>>) {
+fn collide_enemies(mut q: Query<(&mut Transform, &Hitbox), With<Enemy>>) {
     let mut enemies = q.iter_mut();
-    while let Some((mut tr, spr)) = enemies.next() {
-        if let Some((other_tr, other_spr)) = enemies.next() {
-            let collision = collide(
-                tr.translation,
-                spr.custom_size.unwrap(),
-                other_tr.translation,
-                other_spr.custom_size.unwrap(),
-            );
+    while let Some((mut tr, size)) = enemies.next() {
+        if let Some((other_tr, other_size)) = enemies.next() {
+            let collision = collide(tr.translation, size.0, other_tr.translation, other_size.0);
 
             if let Some(coll) = collision {
                 match coll {
                     Collision::Top => {
-                        tr.translation.y -= (tr.translation.y - (spr.custom_size.unwrap().y * 0.5))
-                            - (other_tr.translation.y + (other_spr.custom_size.unwrap().y * 0.5));
+                        tr.translation.y -= (tr.translation.y - (size.0.y * 0.5))
+                            - (other_tr.translation.y + (size.0.y * 0.5));
                         tr.translation.y = tr.translation.y.ceil();
                     }
                     Collision::Bottom => {
-                        tr.translation.y -= (tr.translation.y + (spr.custom_size.unwrap().y * 0.5))
-                            - (other_tr.translation.y - (other_spr.custom_size.unwrap().y * 0.5));
+                        tr.translation.y -= (tr.translation.y + (size.0.y * 0.5))
+                            - (other_tr.translation.y - (size.0.y * 0.5));
                         tr.translation.y = tr.translation.y.ceil();
                     }
                     Collision::Left => {
-                        tr.translation.x -= (tr.translation.x + (spr.custom_size.unwrap().x * 0.5))
-                            - (other_tr.translation.x - (other_spr.custom_size.unwrap().x * 0.5));
+                        tr.translation.x -= (tr.translation.x + (size.0.x * 0.5))
+                            - (other_tr.translation.x - (size.0.x * 0.5));
                         tr.translation.x = tr.translation.x.ceil();
                     }
                     Collision::Right => {
-                        tr.translation.x -= (tr.translation.x - (spr.custom_size.unwrap().x * 0.5))
-                            - (other_tr.translation.x + (other_spr.custom_size.unwrap().x * 0.5));
+                        tr.translation.x -= (tr.translation.x - (size.0.x * 0.5))
+                            - (other_tr.translation.x + (size.0.x * 0.5));
                         tr.translation.x = tr.translation.x.ceil();
                     }
                 }
@@ -388,17 +377,12 @@ fn collide_enemies(mut q: Query<(&mut Transform, &Sprite), With<Enemy>>) {
 
 fn collide_fireballs(
     mut commands: Commands,
-    balls: Query<(Entity, &Transform, &Sprite), With<Fireball>>,
-    col_query: Query<(Entity, &Transform, &Collider, &Sprite), Without<Player>>,
+    balls: Query<(Entity, &Transform, &Hitbox), With<Fireball>>,
+    col_query: Query<(Entity, &Transform, &Collider, &Hitbox), Without<Player>>,
 ) {
-    for (ball_ent, ball_tr, ball_spr) in balls.iter() {
-        for (ent, tr, col, spr) in col_query.iter() {
-            if let Some(_) = collide(
-                ball_tr.translation,
-                ball_spr.custom_size.unwrap(),
-                tr.translation,
-                spr.custom_size.unwrap(),
-            ) {
+    for (ball_ent, ball_tr, ball_size) in balls.iter() {
+        for (ent, tr, col, size) in col_query.iter() {
+            if let Some(_) = collide(ball_tr.translation, ball_size.0, tr.translation, size.0) {
                 match *col {
                     Collider::Enemy => {
                         commands.entity(ball_ent).despawn();

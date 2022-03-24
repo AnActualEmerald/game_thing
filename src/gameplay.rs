@@ -6,7 +6,7 @@ use std::time::Duration;
 use crate::{
     attacks::{self, Attack},
     Collider, CurrentAttack, DifficultyTimer, EnemySpr, EnemyTimer, FireballSpr, FireballTimer,
-    TEX_SIZE, WIN_SIZE,
+    Hitbox, TEX_SIZE, WIN_SIZE,
 };
 
 #[derive(Component)]
@@ -185,7 +185,8 @@ pub fn spawn_enemies(
                     ..Default::default()
                 })
                 .insert(Enemy { speed: 175.0 })
-                .insert(Collider::Enemy);
+                .insert(Collider::Enemy)
+                .insert(Hitbox(Vec2::new(21.0, 24.0)));
         }
         if diff.0.finished() {
             let dur = timer.0.duration();

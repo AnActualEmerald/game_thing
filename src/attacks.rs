@@ -4,6 +4,7 @@ use log::{debug, error, info};
 
 use crate::Collider;
 use crate::Fireball;
+use crate::Hitbox;
 
 // pub fn default(
 //     commands: &mut Commands,
@@ -24,6 +25,10 @@ use crate::Fireball;
 //         })
 //         .with(Collider::Projectile);
 // }
+
+fn fireball_size() -> Vec2 {
+    Vec2::new(26.0, 26.0)
+}
 
 pub struct Split;
 impl Attack for Split {
@@ -54,7 +59,8 @@ impl Attack for Split {
                 origin: *origin,
                 target: target_1,
             })
-            .insert(Collider::Projectile);
+            .insert(Collider::Projectile)
+            .insert(Hitbox(fireball_size()));
 
         commands
             .spawn_bundle(SpriteBundle {
@@ -66,7 +72,8 @@ impl Attack for Split {
                 origin: *origin,
                 target: target_2,
             })
-            .insert(Collider::Projectile);
+            .insert(Collider::Projectile)
+            .insert(Hitbox(fireball_size()));
 
         commands
             .spawn_bundle(SpriteBundle {
@@ -78,7 +85,8 @@ impl Attack for Split {
                 origin: *origin,
                 target: *target,
             })
-            .insert(Collider::Projectile);
+            .insert(Collider::Projectile)
+            .insert(Hitbox(fireball_size()));
     }
 }
 pub struct Basic;
@@ -101,7 +109,8 @@ impl Attack for Basic {
                 origin: *origin,
                 target: *target,
             })
-            .insert(Collider::Projectile);
+            .insert(Collider::Projectile)
+            .insert(Hitbox(fireball_size()));
     }
 }
 
