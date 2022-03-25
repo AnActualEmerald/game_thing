@@ -3,6 +3,7 @@ use bevy::{
     prelude::*,
     sprite::collide_aabb::{collide, Collision},
 };
+use bevy_rapier2d::prelude::*;
 use log::{debug, error, info, trace, warn};
 use simplelog::{CombinedLogger, Config, LevelFilter, TermLogger, TerminalMode};
 use std::fs::File;
@@ -15,6 +16,7 @@ use gameplay::*;
 
 const WIN_SIZE: (f32, f32) = (1280.0 / 2.0, 720.0 / 2.0);
 const TEX_SIZE: f32 = 16.0;
+const PHYS_SCALE: f32 = 32.0;
 
 fn main() {
     //set up logging
@@ -60,17 +62,19 @@ fn main() {
         .init_resource::<MousePos>()
         .init_resource::<MouseDelta>()
         .add_plugins(DefaultPlugins)
+        .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
         .insert_resource(ClearColor(Color::rgb(25.0, 25.0, 50.0)))
         .insert_resource(timer)
         .add_event::<PlayerHitEvent>()
+        .add_startup_system(setup_phys)
         .add_startup_system(setup)
         .add_system(move_sys)
-        .add_system(collide_player)
+        // .add_system(collide_player)
         .add_system(spawn_fireball)
         .add_system(mouse_sys)
         .add_system(move_fireball)
         .add_system(spawner_animate)
-        .add_system(spawn_enemies)
+        // .add_system(spawn_enemies)
         .add_system(move_enemies)
         .add_system(collide_enemies)
         .add_system(collide_fireballs)
@@ -125,6 +129,11 @@ pub struct CurrentAttack(
 
 //--systems--//
 
+//configure the physics world and simulation
+fn setup_phys(mut rapier_config: ResMut<RapierConfiguration>) {
+    rapier_config.scale = 32.0;
+}
+
 //set up assets and stuff
 fn setup(
     mut commands: Commands,
@@ -140,7 +149,6 @@ fn setup(
     let heart = asset_server.load("heart.png");
 
     let spawner = asset_server.load("spawner.png");
-    let mut spawner_transform = Transform::from_scale(Vec3::splat(2.0));
 
     commands
         .spawn_bundle(OrthographicCameraBundle::new_2d())
@@ -155,6 +163,7 @@ fn setup(
             ..Default::default()
         })
         .insert(Reticle);
+    //spawn player
     commands
         .spawn_bundle(SpriteBundle {
             texture: kerb.into(),
@@ -164,14 +173,30 @@ fn setup(
             },
             ..Default::default()
         })
-        .insert(Player::new(200.0))
-        .insert(Hitbox(Vec2::new(32.0, 32.0)));
+        .insert(Player::new(500.0))
+        .insert(Hitbox(Vec2::new(32.0, 32.0)))
+        .insert_bundle(RigidBodyBundle {
+            position: Vec2::new(0.0, 0.0).into(),
+            mass_properties: RigidBodyMassPropsFlags::ROTATION_LOCKED.into(),
+            forces: RigidBodyForces {
+                gravity_scale: 0f32,
+                ..Default::default()
+            }
+            .into(),
+            ..Default::default()
+        })
+        .insert_bundle(ColliderBundle {
+            shape: ColliderShape::cuboid(0.5, 0.5).into(),
+            ..Default::default()
+        })
+        .insert(RigidBodyPositionSync::Discrete);
     commands.insert_resource(FireballSpr(fireball));
     commands.insert_resource(EnemySpr(enemy));
     commands.insert_resource(DifficultyTimer(Timer::from_seconds(30.0, true)));
     commands.insert_resource(CurrentAttack(Box::new(attacks::Split)));
 
-    let spawner_atlas = TextureAtlas::from_grid(spawner, Vec2::new(32.0, 32.0), 3, 1);
+    let mut spawner_transform = Transform::from_scale(Vec3::splat(2.0));
+    let spawner_atlas = TextureAtlas::from_grid(spawner, Vec2::new(22.0, 22.0), 3, 1);
     let spawner_handle = texture_atlases.add(spawner_atlas.into());
     //add spawners
     for x in -1..2 {
@@ -192,7 +217,20 @@ fn setup(
                 .insert(EnemySpawn)
                 .insert(EnemyTimer(Timer::from_seconds(2.0, true)))
                 .insert(Collider::Solid)
-                .insert(Hitbox(Vec2::new(32.0, 50.0)));
+                .insert(Hitbox(Vec2::new(32.0, 50.0)))
+                .insert_bundle(RigidBodyBundle {
+                    position: Vec2::new(
+                        spawner_transform.translation.x / PHYS_SCALE,
+                        spawner_transform.translation.y / PHYS_SCALE,
+                    )
+                    .into(),
+                    body_type: RigidBodyType::Static.into(),
+                    ..Default::default()
+                })
+                .insert_bundle(ColliderBundle {
+                    shape: ColliderShape::cuboid((22.0 / PHYS_SCALE), (22.0 / PHYS_SCALE)).into(),
+                    ..Default::default()
+                });
             info!("Added enemy spawn at {}", spawner_transform.translation);
         }
     }

@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_rapier2d::prelude::{RigidBodyVelocity, RigidBodyVelocityComponent};
 use log::{debug, error, info, trace, warn};
 use rand::random;
 use std::time::Duration;
@@ -57,6 +58,7 @@ pub fn move_sys(
     input: Res<Input<KeyCode>>,
     mut q: Query<(&Player, &mut Transform)>,
     mut ret: Query<&mut Transform, (With<Reticle>, Without<Player>)>,
+    mut player_vel: Query<&mut RigidBodyVelocityComponent, With<Player>>,
 ) {
     for (p, mut transform) in q.iter_mut() {
         let mut x_dir = 0.0;
@@ -82,47 +84,52 @@ pub fn move_sys(
         if input.pressed(KeyCode::LShift) {
             sprint = 1.5;
         }
+        let x_delt = time.delta_seconds() * p.speed * (x_dir + p.mod_x) * sprint;
+        let y_delt = time.delta_seconds() * p.speed * (y_dir + p.mod_y) * sprint;
 
-        let translation = &mut transform.translation;
-
-        translation.x += time.delta_seconds() * p.speed * (x_dir + p.mod_x) * sprint;
-        translation.y += time.delta_seconds() * p.speed * (y_dir + p.mod_y) * sprint;
-
-        //confine player to the screen
-        translation.x = translation
-            .x
-            .min(1280.0 / 2.0 - TEX_SIZE)
-            .max(-(1280.0 / 2.0 - TEX_SIZE));
-        translation.y = translation
-            .y
-            .min(720.0 / 2.0 - TEX_SIZE)
-            .max(-(720.0 / 2.0 - TEX_SIZE));
-
-        //move the reticle
-        let ret_pos = &mut ret.iter_mut().next().unwrap().translation;
-
-        if input.pressed(KeyCode::Up) {
-            ret_pos.y = 100.0;
-        } else if input.pressed(KeyCode::Down) {
-            ret_pos.y = -100.0;
-        }
-
-        if input.pressed(KeyCode::Left) {
-            ret_pos.x = -100.0;
-        } else if input.pressed(KeyCode::Right) {
-            ret_pos.x = 100.0;
-        }
-
-        if !input.pressed(KeyCode::Up) && !input.pressed(KeyCode::Down) {
-            ret_pos.y = 0.0;
-        }
-        if !input.pressed(KeyCode::Left) && !input.pressed(KeyCode::Right) {
-            ret_pos.x = 0.0;
-        }
-
-        ret_pos.x += translation.x;
-        ret_pos.y += translation.y;
+        let mut vel = player_vel.single_mut();
+        vel.linvel = Vec2::new(x_delt, y_delt).into();
     }
+    // let translation = &mut transform.translation;
+
+    // translation.x += time.delta_seconds() * p.speed * (x_dir + p.mod_x) * sprint;
+    // translation.y += time.delta_seconds() * p.speed * (y_dir + p.mod_y) * sprint;
+
+    // //confine player to the screen
+    // translation.x = translation
+    //     .x
+    //     .min(1280.0 / 2.0 - TEX_SIZE)
+    //     .max(-(1280.0 / 2.0 - TEX_SIZE));
+    // translation.y = translation
+    //     .y
+    //     .min(720.0 / 2.0 - TEX_SIZE)
+    //     .max(-(720.0 / 2.0 - TEX_SIZE));
+
+    //     //move the reticle
+    //     let ret_pos = &mut ret.iter_mut().next().unwrap().translation;
+
+    //     if input.pressed(KeyCode::Up) {
+    //         ret_pos.y = 100.0;
+    //     } else if input.pressed(KeyCode::Down) {
+    //         ret_pos.y = -100.0;
+    //     }
+
+    //     if input.pressed(KeyCode::Left) {
+    //         ret_pos.x = -100.0;
+    //     } else if input.pressed(KeyCode::Right) {
+    //         ret_pos.x = 100.0;
+    //     }
+
+    //     if !input.pressed(KeyCode::Up) && !input.pressed(KeyCode::Down) {
+    //         ret_pos.y = 0.0;
+    //     }
+    //     if !input.pressed(KeyCode::Left) && !input.pressed(KeyCode::Right) {
+    //         ret_pos.x = 0.0;
+    //     }
+
+    //     ret_pos.x += translation.x;
+    //     ret_pos.y += translation.y;
+    // }
 }
 
 //spawn a fireball while the left mouse button is held down, on a 0.1s timer
